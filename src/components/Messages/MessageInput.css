@@ -38,7 +38,7 @@
 .message-input-container {
   display: flex;
   gap: 8px;
-  padding: 10px 14px;
+  padding: 5px 12px;
   align-items: center;
   background-color: var(--bg-secondary);
   border-radius: 12px;
@@ -53,9 +53,9 @@
 
 .message-input {
   flex: 1;
-  min-height: 24px;
+  min-height: 20px;
   max-height: 200px;
-  padding: 6px 0;
+  padding: 3px 0;
   border: none;
   border-radius: 0;
   background-color: transparent;

@@ -177,9 +177,33 @@
 /* Language selector */
 .login-lang-selector {
   position: absolute;
-  top: 24px;
+  top: calc(16px + var(--safe-area-top, env(safe-area-inset-top)));
   right: 24px;
   z-index: 10;
+}
+
+/* Back button shown only when adding an account (LoginForm has onCancel). Pinned to the
+   top-left below the status bar so it's reachable even when the keyboard covers the card. */
+.login-back-button {
+  position: absolute;
+  top: calc(12px + var(--safe-area-top, env(safe-area-inset-top)));
+  left: 16px;
+  z-index: 10;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.login-back-button:hover {
+  background: var(--sidebar-hover);
 }
 
 .login-lang-button {
