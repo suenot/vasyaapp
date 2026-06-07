@@ -4,7 +4,10 @@
   flex-direction: column;
   position: relative;
   padding: 0 16px 0 16px;
-  padding-bottom: max(16px, var(--safe-area-bottom, env(safe-area-inset-bottom)));
+  /* Clear the home indicator when the keyboard is CLOSED, but when it's open the keyboard
+     covers that area, so collapse the bottom padding (subtract the keyboard height) and sit
+     the input snugly above the keyboard instead of leaving the full safe-area gap. */
+  padding-bottom: max(8px, calc(var(--safe-area-bottom, env(safe-area-inset-bottom)) - var(--keyboard-height, 0px)));
   transition: padding-bottom 0.15s ease-out;
   max-width: 800px;
   width: 100%;
