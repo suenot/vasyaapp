@@ -1,12 +1,17 @@
 .login-container {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   width: 100vw;
-  height: 100vh;
+  /* Track the visible viewport so the on-screen keyboard shrinks this and the form can
+     scroll instead of hiding the Continue/Cancel buttons behind the keyboard. */
+  height: var(--app-height, 100dvh);
+  overflow-y: auto;
+  /* Clear the status bar when the card scrolls (keyboard open) and the language/back buttons. */
+  padding: calc(56px + var(--safe-area-top, env(safe-area-inset-top))) 0 16px;
   background: var(--bg-primary);
   font-family: var(--font-family);
-  overflow: hidden;
 }
 
 .login-card {
@@ -22,6 +27,10 @@
   border: 1px solid var(--border-color);
   box-shadow: 0 12px 24px var(--message-shadow);
   animation: cardAppear 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+  /* Auto margins center the card when it fits and still allow scrolling to the top/bottom
+     edges when it doesn't (e.g. keyboard open); never let it get squished. */
+  margin: auto;
+  flex-shrink: 0;
 }
 
 @keyframes cardAppear {
@@ -176,7 +185,7 @@
 
 /* Language selector */
 .login-lang-selector {
-  position: absolute;
+  position: fixed;
   top: calc(16px + var(--safe-area-top, env(safe-area-inset-top)));
   right: 24px;
   z-index: 10;
@@ -185,7 +194,7 @@
 /* Back button shown only when adding an account (LoginForm has onCancel). Pinned to the
    top-left below the status bar so it's reachable even when the keyboard covers the card. */
 .login-back-button {
-  position: absolute;
+  position: fixed;
   top: calc(12px + var(--safe-area-top, env(safe-area-inset-top)));
   left: 16px;
   z-index: 10;
