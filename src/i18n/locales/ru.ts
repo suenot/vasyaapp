@@ -130,6 +130,7 @@ export const ru: Record<TranslationKey, string> = {
   text_size_medium: 'Средний',
   text_size_large: 'Большой',
   notifications: 'Уведомления',
+  notifications_enabled: 'Показывать уведомления',
   notification_sound: 'Звук уведомлений',
   message_preview: 'Предпросмотр сообщений',
   chat_density: 'Компактность списка чатов',

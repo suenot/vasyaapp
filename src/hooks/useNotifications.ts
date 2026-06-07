@@ -39,6 +39,7 @@ interface NewMessageEvent {
 export function useNotifications(selectedChatId: number | null) {
   const permissionGranted = useRef(false);
   const isMuted = useMuteStore((s) => s.isMuted);
+  const notificationsEnabled = useSettingsStore((s) => s.notificationsEnabled);
   const notificationSound = useSettingsStore((s) => s.notificationSound);
   const messagePreview = useSettingsStore((s) => s.messagePreview);
 
@@ -59,12 +60,17 @@ export function useNotifications(selectedChatId: number | null) {
   // Use refs to always have the latest values in the callback
   const selectedChatIdRef = useRef(selectedChatId);
   selectedChatIdRef.current = selectedChatId;
+  const notificationsEnabledRef = useRef(notificationsEnabled);
+  notificationsEnabledRef.current = notificationsEnabled;
   const notificationSoundRef = useRef(notificationSound);
   notificationSoundRef.current = notificationSound;
   const messagePreviewRef = useRef(messagePreview);
   messagePreviewRef.current = messagePreview;
 
   const handleNewMessage = useCallback(async (evt: NewMessageEvent) => {
+    // Master switch: notifications disabled in settings
+    if (!notificationsEnabledRef.current) return;
+
     // Skip outgoing messages
     if (evt.isOutgoing) return;
 

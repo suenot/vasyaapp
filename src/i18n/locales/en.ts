@@ -128,6 +128,7 @@ export const en = {
   text_size_medium: 'Medium',
   text_size_large: 'Large',
   notifications: 'Notifications',
+  notifications_enabled: 'Enable Notifications',
   notification_sound: 'Notification Sound',
   message_preview: 'Message Preview',
   chat_density: 'Chat List Density',

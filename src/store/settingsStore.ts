@@ -31,6 +31,7 @@ interface SettingsStore {
   markdownMode: 'plain' | 'rendered';
   mergeMessages: boolean;
   interfaceScale: number;
+  notificationsEnabled: boolean;
   notificationSound: boolean;
   messagePreview: boolean;
 
@@ -45,6 +46,7 @@ interface SettingsStore {
   setMarkdownMode: (mode: 'plain' | 'rendered') => void;
   setMergeMessages: (merge: boolean) => void;
   setInterfaceScale: (scale: number) => void;
+  setNotificationsEnabled: (enabled: boolean) => void;
   setNotificationSound: (enabled: boolean) => void;
   setMessagePreview: (enabled: boolean) => void;
 }
@@ -67,6 +69,7 @@ export const useSettingsStore = create<SettingsStore>()(
       markdownMode: 'plain' as const,
       mergeMessages: true,
       interfaceScale: 100,
+      notificationsEnabled: true,
       notificationSound: true,
       messagePreview: true,
 
@@ -115,6 +118,7 @@ export const useSettingsStore = create<SettingsStore>()(
       setMarkdownMode: (mode) => set({ markdownMode: mode }),
       setMergeMessages: (merge) => set({ mergeMessages: merge }),
       setInterfaceScale: (scale) => set({ interfaceScale: scale }),
+      setNotificationsEnabled: (enabled) => set({ notificationsEnabled: enabled }),
       setNotificationSound: (enabled) => set({ notificationSound: enabled }),
       setMessagePreview: (enabled) => set({ messagePreview: enabled }),
     }),

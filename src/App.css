@@ -114,7 +114,9 @@ body {
   width: 100vw;
   height: 100vh;
   height: 100dvh;
-  height: calc(100dvh - var(--keyboard-height, 0px));
+  /* Drive height from the real visible viewport so the on-screen keyboard shrinks the
+     layout (var set in index.html from visualViewport.height); falls back to 100dvh. */
+  height: var(--app-height, 100dvh);
   display: flex;
   overflow: hidden;
 }

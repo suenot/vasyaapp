@@ -104,7 +104,7 @@ export const AccountSettings = ({ onClose }: AccountSettingsProps) => {
   const [selectedChatTypes, setSelectedChatTypes] = useState<ChatTypeFilter[]>([]);
   const [selectedIcon, setSelectedIcon] = useState<string>('folder');
 
-  const { folderLayout, setFolderLayout, chatDensity, setChatDensity, mergeMessages, setMergeMessages, interfaceScale, setInterfaceScale, notificationSound, setNotificationSound, messagePreview, setMessagePreview, messageTextSize, setMessageTextSize } = useSettingsStore();
+  const { folderLayout, setFolderLayout, chatDensity, setChatDensity, mergeMessages, setMergeMessages, interfaceScale, setInterfaceScale, notificationsEnabled, setNotificationsEnabled, notificationSound, setNotificationSound, messagePreview, setMessagePreview, messageTextSize, setMessageTextSize } = useSettingsStore();
 
   const folderIcons: IconName[] = [
     'folder', 'all', 'contacts', 'chats', 'favorites', 
@@ -319,19 +319,28 @@ export const AccountSettings = ({ onClose }: AccountSettingsProps) => {
         <h3>{t('notifications')}</h3>
         <div className="settings-item toggle">
           <div className="settings-item-label">
-            <div className="settings-item-title">{t('notification_sound')}</div>
+            <div className="settings-item-title">{t('notifications_enabled')}</div>
           </div>
           <label className="toggle-switch">
-            <input type="checkbox" checked={notificationSound} onChange={(e) => setNotificationSound(e.target.checked)} />
+            <input type="checkbox" checked={notificationsEnabled} onChange={(e) => setNotificationsEnabled(e.target.checked)} />
             <span className="toggle-slider"></span>
           </label>
         </div>
-        <div className="settings-item toggle">
+        <div className="settings-item toggle" style={{ opacity: notificationsEnabled ? 1 : 0.4 }}>
+          <div className="settings-item-label">
+            <div className="settings-item-title">{t('notification_sound')}</div>
+          </div>
+          <label className="toggle-switch">
+            <input type="checkbox" checked={notificationSound} disabled={!notificationsEnabled} onChange={(e) => setNotificationSound(e.target.checked)} />
+            <span className="toggle-slider"></span>
+          </label>
+        </div>
+        <div className="settings-item toggle" style={{ opacity: notificationsEnabled ? 1 : 0.4 }}>
           <div className="settings-item-label">
             <div className="settings-item-title">{t('message_preview')}</div>
           </div>
           <label className="toggle-switch">
-            <input type="checkbox" checked={messagePreview} onChange={(e) => setMessagePreview(e.target.checked)} />
+            <input type="checkbox" checked={messagePreview} disabled={!notificationsEnabled} onChange={(e) => setMessagePreview(e.target.checked)} />
             <span className="toggle-slider"></span>
           </label>
         </div>

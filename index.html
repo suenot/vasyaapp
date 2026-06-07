@@ -4,23 +4,75 @@
 <head>
   <meta charset="UTF-8" />
   <link rel="icon" type="image/svg+xml" href="/vasyapp.svg" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=overlays-content" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=overlays-content" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&display=swap" rel="stylesheet">
   <title>Vasyapp</title>
   <script>
-    // Android keyboard: compute keyboard height via visualViewport and expose as CSS variable.
-    // With overlays-content the layout viewport never shrinks, so we track the offset ourselves.
-    function updateKeyboardInset() {
-      if (!window.visualViewport) return;
-      var kbHeight = window.innerHeight - window.visualViewport.height;
-      document.documentElement.style.setProperty('--keyboard-height', Math.max(0, kbHeight) + 'px');
+    // Keyboard handling. On the iOS WKWebView the on-screen keyboard shrinks BOTH
+    // window.innerHeight and window.visualViewport.height together, so the old
+    // `innerHeight - visualViewport.height` formula always computed 0 and the layout never
+    // adjusted — meanwhile 100dvh stays at full height, so the position:fixed chat container
+    // kept its full height and iOS shifted the visible region to the focused input, pushing
+    // the chat header off the top of the screen.
+    //
+    // Fix: drive the app height directly from visualViewport.height (the real visible area
+    // above the keyboard) and derive the keyboard height from the tallest height seen.
+    var fullViewportH = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+    function updateViewport() {
+      var vv = window.visualViewport;
+      var h = vv ? vv.height : window.innerHeight;
+      if (h > fullViewportH) fullViewportH = h;
+      var root = document.documentElement;
+      root.style.setProperty('--app-height', h + 'px');
+      root.style.setProperty('--keyboard-height', Math.max(0, fullViewportH - h) + 'px');
+      // When the keyboard opens, iOS shifts the visual viewport down by offsetTop while
+      // position:fixed stays glued to the layout viewport (rendering at physical -offsetTop).
+      // Re-apply that offset to the fixed chat container's `top` so its header stays on screen.
+      root.style.setProperty('--vv-offset-top', (vv ? vv.offsetTop : 0) + 'px');
     }
+    updateViewport();
     if (window.visualViewport) {
-      window.visualViewport.addEventListener('resize', updateKeyboardInset);
-      window.visualViewport.addEventListener('scroll', updateKeyboardInset);
+      window.visualViewport.addEventListener('resize', updateViewport);
+      window.visualViewport.addEventListener('scroll', updateViewport);
     }
+    // The keyboard animates open after focusin; re-measure on a few ticks to catch the end state.
+    ['resize', 'orientationchange', 'pageshow', 'focusin', 'focusout'].forEach(function (ev) {
+      window.addEventListener(ev, function () {
+        [0, 50, 150, 300, 500].forEach(function (t) { setTimeout(updateViewport, t); });
+      });
+    });
+    // Safe-area insets: env(safe-area-inset-*) is unreliable in the iOS WKWebView
+    // (returns 0 until a relayout happens). Measure it via a hidden probe and expose
+    // the values as CSS variables, re-measuring on every event that can change them.
+    function updateSafeAreaInsets() {
+      var root = document.documentElement;
+      var p = document.getElementById('__safe_area_probe');
+      if (!p) {
+        p = document.createElement('div');
+        p.id = '__safe_area_probe';
+        p.style.cssText = 'position:fixed;top:0;left:0;width:0;height:0;visibility:hidden;' +
+          'pointer-events:none;z-index:-1;' +
+          'padding-top:env(safe-area-inset-top);padding-right:env(safe-area-inset-right);' +
+          'padding-bottom:env(safe-area-inset-bottom);padding-left:env(safe-area-inset-left);';
+        root.appendChild(p);
+      }
+      var cs = getComputedStyle(p);
+      root.style.setProperty('--safe-area-top', (parseFloat(cs.paddingTop) || 0) + 'px');
+      root.style.setProperty('--safe-area-right', (parseFloat(cs.paddingRight) || 0) + 'px');
+      root.style.setProperty('--safe-area-bottom', (parseFloat(cs.paddingBottom) || 0) + 'px');
+      root.style.setProperty('--safe-area-left', (parseFloat(cs.paddingLeft) || 0) + 'px');
+    }
+    updateSafeAreaInsets();
+    ['DOMContentLoaded', 'load', 'resize', 'orientationchange', 'pageshow'].forEach(function (ev) {
+      window.addEventListener(ev, updateSafeAreaInsets);
+    });
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', updateSafeAreaInsets);
+    }
+    // Catch the delayed relayout when the webview finally reports real insets.
+    [0, 50, 150, 400, 1000, 2000].forEach(function (t) { setTimeout(updateSafeAreaInsets, t); });
   </script>
 </head>
 

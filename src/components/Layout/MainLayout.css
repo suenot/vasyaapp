@@ -2,7 +2,7 @@
   display: flex;
   height: 100vh;
   height: 100dvh;
-  height: calc(100dvh - var(--keyboard-height, 0px));
+  height: var(--app-height, 100dvh);
   width: 100vw;
   overflow: hidden;
   background-color: var(--bg-primary);
@@ -600,6 +600,7 @@
 
 .content-header {
   height: 56px;
+  flex-shrink: 0;
   padding: 0 24px;
   background: var(--bg-primary);
   border-bottom: 1px solid var(--border-color);
@@ -609,9 +610,20 @@
   z-index: 5;
 }
 
+/* Left side (back button + title) must be able to shrink so the
+   title truncates instead of wrapping / colliding with the actions.
+   Scoped to the chat header so it doesn't affect the sidebar's .header-left. */
+.content-header .header-left {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
 .content-header-info {
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .content-header h3 {
@@ -619,17 +631,25 @@
   font-size: 16px;
   font-weight: 600;
   color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 
 .content-header .status {
   font-size: 13px;
   color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .content-header-actions {
   display: flex;
   align-items: center;
   gap: 4px;
+  flex-shrink: 0;
 }
 
 .messages-area {
@@ -1063,11 +1083,13 @@
     display: none;
     width: 100%;
     position: fixed;
-    /* Fix content to cover screen */
-    top: 0;
+    /* Fix content to cover screen. `top` follows visualViewport.offsetTop so the fixed
+       container (and its header) stays aligned with the visible area when the iOS keyboard
+       shifts the visual viewport; height tracks the visible viewport height. */
+    top: var(--vv-offset-top, 0px);
     left: 0;
     height: 100dvh;
-    height: calc(100dvh - var(--keyboard-height, 0px));
+    height: var(--app-height, 100dvh);
     z-index: 20;
     /* Above sidebar */
   }
@@ -1087,18 +1109,19 @@
     z-index: 30;
   }
 
-  /* Safe area insets for mobile */
+  /* Safe area insets for mobile. Uses the JS-measured --safe-area-top
+     (env() is unreliable in the iOS WKWebView) with an env() fallback. */
   .sidebar-header {
-    padding-top: max(12px, env(safe-area-inset-top));
+    padding-top: max(12px, var(--safe-area-top, env(safe-area-inset-top)));
   }
 
   .content-header {
-    padding-top: env(safe-area-inset-top);
-    height: calc(56px + env(safe-area-inset-top));
-    align-items: flex-end;
-    /* Align bottom to keep vertical center with padding */
-    padding-bottom: 10px;
-    /* Adjust as needed */
+    padding-top: var(--safe-area-top, env(safe-area-inset-top));
+    height: calc(56px + var(--safe-area-top, env(safe-area-inset-top)));
+    /* Center the header row in the 56px band below the status bar */
+    align-items: center;
+    padding-left: 10px;
+    padding-right: 8px;
   }
 
   /* Ensure back button is visible */
