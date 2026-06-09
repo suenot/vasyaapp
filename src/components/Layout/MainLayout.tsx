@@ -35,6 +35,10 @@ export const MainLayout = () => {
   const [chats, setChats] = useState<Chat[]>(
     activeAccount ? getCachedChats(activeAccount.id) || [] : []
   );
+  // Latest chats accessible from stable callbacks without putting `chats` in
+  // their deps (which would rebuild them on every streaming flush).
+  const chatsRef = useRef(chats);
+  chatsRef.current = chats;
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [selectedChatId, setSelectedChatId] = useState<number | null>(null);
@@ -78,6 +82,10 @@ export const MainLayout = () => {
   const [chatIdsSet] = useState(() => new Set<number>());
   const [loadedChatsArr] = useState<Chat[]>(() => []);
   const flushRef = useRef(0);
+  // Coalesce background avatar updates: many `chat-avatar-updated` events per
+  // second are merged into a single state update per animation frame.
+  const pendingAvatarsRef = useRef<Map<number, string>>(new Map());
+  const avatarFlushRef = useRef(0);
 
   useTauriEvent<Chat>('chat-loaded', useCallback((chat: Chat) => {
     if (chatIdsSet.has(chat.id)) return;
@@ -99,15 +107,23 @@ export const MainLayout = () => {
     }
   }, [chatIdsSet, loadedChatsArr]));
 
-  // Handle avatar updates from background downloads
+  // Handle avatar updates from background downloads (batched per frame)
   useTauriEvent<{ chatId: number; avatarPath: string }>('chat-avatar-updated', useCallback((evt) => {
     const idx = loadedChatsArr.findIndex((c) => c.id === evt.chatId);
     if (idx !== -1) {
       loadedChatsArr[idx] = { ...loadedChatsArr[idx], avatarPath: evt.avatarPath };
     }
-    setChats((prev) => prev.map((c) =>
-      c.id === evt.chatId ? { ...c, avatarPath: evt.avatarPath } : c
-    ));
+    pendingAvatarsRef.current.set(evt.chatId, evt.avatarPath);
+    if (!avatarFlushRef.current) {
+      avatarFlushRef.current = requestAnimationFrame(() => {
+        avatarFlushRef.current = 0;
+        const pending = pendingAvatarsRef.current;
+        pendingAvatarsRef.current = new Map();
+        setChats((prev) => prev.map((c) =>
+          pending.has(c.id) ? { ...c, avatarPath: pending.get(c.id)! } : c
+        ));
+      });
+    }
   }, [loadedChatsArr]));
 
   useTauriEvent<number>('chats-loading-complete', useCallback((_total: number) => {
@@ -118,6 +134,49 @@ export const MainLayout = () => {
     setError('');
   }, [activeAccount, setCachedChats, loadedChatsArr]));
 
+  // Keep the chat list reactive to incoming messages even when the chat is not
+  // open: update the last-message preview, bump unread (unless it's the open
+  // chat or our own message), and move the chat to the top of the list.
+  useTauriEvent<{
+    accountId: string;
+    chatId: number;
+    text: string | null;
+    isOutgoing: boolean;
+    hasMedia: boolean;
+    mediaType?: string;
+  }>('telegram:new-message', useCallback((evt) => {
+    if (evt.accountId !== activeAccountId) return;
+
+    const mediaEmoji: Record<string, string> = {
+      photo: '🖼️', video: '🎬', voice: '🎤', audio: '🎵',
+      document: '📄', sticker: '🪧', videonote: '🎥',
+    };
+    const preview = (evt.text && evt.text.trim())
+      || (evt.hasMedia ? (mediaEmoji[evt.mediaType ?? ''] ?? '📎') : '');
+    const bumpUnread = !evt.isOutgoing && evt.chatId !== selectedChatId;
+
+    const apply = (list: Chat[]): Chat[] => {
+      const idx = list.findIndex((c) => c.id === evt.chatId);
+      if (idx === -1) return list; // unknown chat — it will appear after next sync
+      const updated: Chat = {
+        ...list[idx],
+        lastMessage: preview || list[idx].lastMessage,
+        unreadCount: bumpUnread ? list[idx].unreadCount + 1 : list[idx].unreadCount,
+      };
+      const next = list.slice();
+      next.splice(idx, 1);
+      next.unshift(updated);
+      return next;
+    };
+
+    setChats((prev) => apply(prev));
+    // Mirror the reorder/update into the streaming array so a later rAF flush
+    // (during initial load) doesn't revert it.
+    const merged = apply(loadedChatsArr);
+    loadedChatsArr.length = 0;
+    for (const c of merged) loadedChatsArr.push(c);
+  }, [activeAccountId, selectedChatId, loadedChatsArr]));
+
   // Listen for connection-status events from backend updates handler
   const setConnectionStatus = useConnectionStore((s) => s.setStatus);
   useTauriEvent<{ accountId: string; status: string }>('connection-status', useCallback((evt) => {
@@ -126,10 +185,11 @@ export const MainLayout = () => {
     }
   }, [activeAccountId, setConnectionStatus]));
 
-  // Cancel pending flush on unmount
+  // Cancel pending flushes on unmount
   useEffect(() => {
     return () => {
       if (flushRef.current) cancelAnimationFrame(flushRef.current);
+      if (avatarFlushRef.current) cancelAnimationFrame(avatarFlushRef.current);
     };
   }, []);
 
@@ -144,6 +204,11 @@ export const MainLayout = () => {
       cancelAnimationFrame(flushRef.current);
       flushRef.current = 0;
     }
+    if (avatarFlushRef.current) {
+      cancelAnimationFrame(avatarFlushRef.current);
+      avatarFlushRef.current = 0;
+    }
+    pendingAvatarsRef.current.clear();
     chatIdsSet.clear();
     loadedChatsArr.length = 0;
   }, [activeAccountId, chatIdsSet, loadedChatsArr]);
@@ -378,7 +443,7 @@ export const MainLayout = () => {
   // Mark chat as read locally (optimistic update for unread badge)
   const clearUnreadCount = useCallback((chatId: number) => {
     if (!activeAccount) return;
-    const chat = chats.find((c) => c.id === chatId);
+    const chat = chatsRef.current.find((c) => c.id === chatId);
     if (!chat || chat.unreadCount === 0) return;
 
     // Update local state immediately (optimistic)
@@ -392,7 +457,7 @@ export const MainLayout = () => {
     }
     // Update persisted chats store
     useChatsStore.getState().updateUnreadCount(activeAccount.id, chatId, 0);
-  }, [activeAccount, chats, loadedChatsArr]);
+  }, [activeAccount, loadedChatsArr]);
 
   // Mark messages as read via context menu (without opening the chat)
   const markChatAsRead = useCallback(async (chatId: number) => {
@@ -525,10 +590,15 @@ export const MainLayout = () => {
   const toggleMute = useMuteStore((s) => s.toggleMute);
   const isSelectionMode = useSelectionStore((s) => s.isSelectionMode);
   const exitSelectionMode = useSelectionStore((s) => s.exitSelectionMode);
-  const visibleTabs = useFolderStore((s) => s.getVisibleTabs)();
+  // Subscribe to the underlying tab/folder data (not the stable getter), so the
+  // component actually re-renders — and hotkeys see the current tab list — when
+  // tab visibility changes in settings.
+  const tabs = useFolderStore((s) => s.tabs);
+  const getVisibleTabs = useFolderStore((s) => s.getVisibleTabs);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const visibleTabs = useMemo(() => getVisibleTabs(), [getVisibleTabs, tabs, folders]);
 
-  useEffect(() => {
-    const handleGlobalKeydown = (e: KeyboardEvent) => {
+  const handleGlobalKeydown = (e: KeyboardEvent) => {
       // Helper: Check if hotkey matches
       const isMatch = (id: string): boolean => {
         const config = hotkeys.find((h) => h.id === id);
@@ -789,10 +859,16 @@ export const MainLayout = () => {
       }
     };
 
-    window.addEventListener('keydown', handleGlobalKeydown);
-    return () => window.removeEventListener('keydown', handleGlobalKeydown);
-  }, [hotkeys, filteredChats, selectedChatId, selectedTopic, showSettings, showChatInfo,
-      isSearchExpanded, searchQuery, highlightedIndex, handleChatClick, toggleMute, visibleTabs]);
+  // Install a single keydown listener; it always calls the latest handler via a
+  // ref, so we no longer remove/re-add the window listener on every render
+  // (previously triggered by every keystroke, stream flush and tab change).
+  const keydownHandlerRef = useRef(handleGlobalKeydown);
+  keydownHandlerRef.current = handleGlobalKeydown;
+  useEffect(() => {
+    const listener = (e: KeyboardEvent) => keydownHandlerRef.current(e);
+    window.addEventListener('keydown', listener);
+    return () => window.removeEventListener('keydown', listener);
+  }, []);
 
   return (
     <div className={`main-layout ${selectedChatId ? 'chat-open' : ''} layout-${folderLayout}`}>

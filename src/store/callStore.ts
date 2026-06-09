@@ -221,6 +221,11 @@ export const useCallStore = create<CallStore>()((set, get) => ({
     console.log('[CallStore] Setting up call event listeners');
     const unlisteners: Promise<UnlistenFn>[] = [];
 
+    // Audio level arrives dozens of times per second; coalesce to one store
+    // update per animation frame so the whole call UI doesn't re-render per event.
+    let pendingAudioLevel: number | null = null;
+    let audioLevelRaf = 0;
+
     // Incoming call
     unlisteners.push(
       listen<{ callId: number; accessHash: number; userId: number; userName: string; isVideo: boolean; accountId: string }>('telegram:incoming-call', (event) => {
@@ -282,10 +287,16 @@ export const useCallStore = create<CallStore>()((set, get) => ({
       })
     );
 
-    // Audio level from VoIP sidecar
+    // Audio level from VoIP sidecar (throttled to one update per frame)
     unlisteners.push(
       listen<{ level: number }>('telegram:call-audio-level', (event) => {
-        set({ audioLevel: event.payload.level });
+        pendingAudioLevel = event.payload.level;
+        if (!audioLevelRaf) {
+          audioLevelRaf = requestAnimationFrame(() => {
+            audioLevelRaf = 0;
+            if (pendingAudioLevel !== null) set({ audioLevel: pendingAudioLevel });
+          });
+        }
       })
     );
 

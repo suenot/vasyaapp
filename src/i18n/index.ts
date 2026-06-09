@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { en, TranslationKey } from './locales/en';
@@ -32,20 +33,23 @@ export const useLanguageStore = create<LanguageStore>()(
 
 export function useTranslation() {
   const language = useLanguageStore((s) => s.language);
-  const t = translations[language];
 
-  return {
-    t: (key: TranslationKey, params?: Record<string, string>) => {
-      let value = t[key] || en[key] || key;
+  // Memoize `t` by language so it keeps a stable identity across renders and
+  // doesn't break the memoization of callbacks/children that depend on it.
+  const t = useMemo(() => {
+    const table = translations[language];
+    return (key: TranslationKey, params?: Record<string, string>) => {
+      let value = table[key] || en[key] || key;
       if (params) {
         for (const [k, v] of Object.entries(params)) {
           value = value.replace(`{${k}}`, v);
         }
       }
       return value;
-    },
-    language,
-  };
+    };
+  }, [language]);
+
+  return { t, language };
 }
 
 export type { TranslationKey };

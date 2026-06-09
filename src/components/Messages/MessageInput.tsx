@@ -346,7 +346,6 @@ export const MessageInput = ({ accountId, chatId, topicId, onMessageSent }: Mess
               onChange={(e) => setText(e.target.value)}
               onKeyDown={handleKeyDown}
               onPaste={handlePaste}
-              disabled={sending}
               rows={1}
               autoFocus
               autoComplete="off"

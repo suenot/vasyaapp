@@ -13,13 +13,23 @@ interface ContextMenu {
 
 export const AccountSwitcher = () => {
   const { t } = useTranslation();
-  const { accounts, activeAccountId, setActiveAccount, clearActiveAccount, removeAccount } = useAccountsStore();
+  // Individual selectors — avoid subscribing to the whole store.
+  const accounts = useAccountsStore((s) => s.accounts);
+  const activeAccountId = useAccountsStore((s) => s.activeAccountId);
+  const setActiveAccount = useAccountsStore((s) => s.setActiveAccount);
+  const clearActiveAccount = useAccountsStore((s) => s.clearActiveAccount);
+  const removeAccount = useAccountsStore((s) => s.removeAccount);
   const [avatars, setAvatars] = useState<Record<string, string>>({});
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
   const [loggingOut, setLoggingOut] = useState<string | null>(null);
 
+  // Fetch avatars only for accounts we don't already have, and only when the
+  // *set* of accounts changes — switching the active account rebuilds the
+  // account objects but not their ids, so this no longer refetches every avatar.
+  const accountIdsKey = accounts.map((a) => a.id).join(',');
   useEffect(() => {
     accounts.forEach(acc => {
+      if (avatars[acc.id]) return;
       invoke<string | null>('get_my_avatar', { accountId: acc.id })
         .then((path) => {
           if (path) {
@@ -28,7 +38,8 @@ export const AccountSwitcher = () => {
         })
         .catch(() => { });
     });
-  }, [accounts]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountIdsKey]);
 
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
 

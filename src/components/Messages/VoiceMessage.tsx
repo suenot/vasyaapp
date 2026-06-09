@@ -24,12 +24,17 @@ const PROGRESS_KEYS: Record<string, TranslationKey> = {
 
 export const VoiceMessage = ({ fileSrc, filePath, chatId, messageId }: VoiceMessageProps) => {
     const { t } = useTranslation();
-    const transcriptions = useSttStore((s) => s.transcriptions);
-    const transcribing = useSttStore((s) => s.transcribing);
-    const errors = useSttStore((s) => s.errors);
+    const key = `${chatId}_${messageId}`;
+
+    // Keyed selectors — this voice message only re-renders when *its own*
+    // transcription state changes, not when any other message is transcribed.
+    const text = useSttStore((s) => s.transcriptions[key]);
+    const error = useSttStore((s) => s.errors[key]);
+    const isTranscribing = useSttStore((s) => s.transcribing.has(key));
+    // Only the message currently being transcribed subscribes to progress.
+    const whisperProgress = useSttStore((s) => (s.transcribing.has(key) ? s.whisperProgress : null));
     const transcribe = useSttStore((s) => s.transcribe);
     const clearError = useSttStore((s) => s.clearError);
-    const whisperProgress = useSttStore((s) => s.whisperProgress);
     const setWhisperProgress = useSttStore((s) => s.setWhisperProgress);
 
     const audioRef = useRef<HTMLAudioElement>(null);
@@ -37,21 +42,15 @@ export const VoiceMessage = ({ fileSrc, filePath, chatId, messageId }: VoiceMess
     const [duration, setDuration] = useState(0);
     const [currentTime, setCurrentTime] = useState(0);
 
-    const key = `${chatId}_${messageId}`;
-    const text = transcriptions[key];
-    const error = errors[key];
-    const isTranscribing = transcribing.has(key);
-
-    // Listen for whisper progress events from the backend
+    // Register the whisper-progress listener only while this message is being
+    // transcribed — avoids one Tauri listener per voice message in the list.
     useTauriEvent<WhisperProgress>('whisper-progress', (payload) => {
-        if (isTranscribing) {
-            setWhisperProgress(payload);
-            if (payload.event === 'done') {
-                // Clear progress shortly after done
-                setTimeout(() => setWhisperProgress(null), 500);
-            }
+        setWhisperProgress(payload);
+        if (payload.event === 'done') {
+            // Clear progress shortly after done
+            setTimeout(() => setWhisperProgress(null), 500);
         }
-    });
+    }, isTranscribing);
 
     const formattedTime = useMemo(() => {
         const time = isPlaying || currentTime > 0 ? currentTime : duration;

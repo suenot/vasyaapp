@@ -1,11 +1,17 @@
 import { useEffect, useRef } from 'react';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 
-export function useTauriEvent<T>(eventName: string, handler: (payload: T) => void) {
+export function useTauriEvent<T>(
+  eventName: string,
+  handler: (payload: T) => void,
+  enabled = true,
+) {
   const handlerRef = useRef(handler);
   handlerRef.current = handler;
 
   useEffect(() => {
+    if (!enabled) return;
+
     let unlisten: UnlistenFn | null = null;
     let mounted = true;
 
@@ -25,5 +31,5 @@ export function useTauriEvent<T>(eventName: string, handler: (payload: T) => voi
       mounted = false;
       if (unlisten) unlisten();
     };
-  }, [eventName]);
+  }, [eventName, enabled]);
 }
