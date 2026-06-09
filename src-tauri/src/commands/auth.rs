@@ -10,6 +10,17 @@ use crate::telegram::auth::{AuthToken, UserInfo};
 use crate::AppState;
 use super::flood_wait::with_flood_wait_retry;
 
+/// Mask a phone number for logging — keep only the last 4 digits to avoid
+/// writing PII to disk-backed logs.
+fn mask_phone(phone: &str) -> String {
+    let digits: Vec<char> = phone.chars().filter(|c| c.is_ascii_digit()).collect();
+    if digits.len() <= 4 {
+        return "***".to_string();
+    }
+    let last4: String = digits[digits.len() - 4..].iter().collect();
+    format!("***{}", last4)
+}
+
 /// Request login code from Telegram
 #[tauri::command]
 pub async fn request_login_code(
@@ -26,7 +37,7 @@ pub async fn request_login_code(
     let api_hash = client_manager.api_hash();
 
     tracing::info!(
-        phone = %phone,
+        phone = %mask_phone(&phone),
         api_id = api_id,
         api_hash_len = api_hash.len(),
         "Requesting login code"

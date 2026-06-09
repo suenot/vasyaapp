@@ -551,6 +551,22 @@ export const AccountSettings = ({ onClose }: AccountSettingsProps) => {
         </div>
       </div>
 
+      {sttSettings.provider === 'deepgram' && (
+        <div className="settings-group">
+          <h3>{t('deepgram_api_key')}</h3>
+          <input
+            type="password"
+            className="stt-language-select"
+            value={sttSettings.deepgram_api_key ?? ''}
+            onChange={(e) => saveSttSettings({ deepgram_api_key: e.target.value || null })}
+            placeholder={t('deepgram_api_key_placeholder')}
+            autoComplete="off"
+            spellCheck={false}
+          />
+          <p className="stt-provider-desc">{t('deepgram_api_key_help')}</p>
+        </div>
+      )}
+
       <div className="settings-group">
         <h3>{t('recognition_language')}</h3>
         <select className="stt-language-select" value={sttSettings.language} onChange={(e) => saveSttSettings({ language: e.target.value })} autoComplete="off">

@@ -14,6 +14,20 @@ function nextKey(): string {
   return `md-${++keyCounter}`;
 }
 
+// Allowlist URL schemes for links/images coming from untrusted message text.
+// Strips control chars/whitespace first so `java\nscript:` style obfuscation
+// cannot slip past the scheme check. Returns null for disallowed/unsafe URLs.
+const ALLOWED_URL_SCHEMES = ['http', 'https', 'tg', 'mailto'];
+function safeUrl(url: string): string | null {
+  // eslint-disable-next-line no-control-regex
+  const cleaned = url.replace(/[\x00-\x20]+/g, '');
+  const schemeMatch = cleaned.match(/^([a-z][a-z0-9+.-]*):/i);
+  if (schemeMatch && !ALLOWED_URL_SCHEMES.includes(schemeMatch[1].toLowerCase())) {
+    return null;
+  }
+  return url.trim();
+}
+
 // Parse inline markdown into React nodes
 function parseInline(text: string): ReactNode[] {
   const nodes: ReactNode[] = [];
@@ -42,17 +56,27 @@ function parseInline(text: string): ReactNode[] {
       const code = match[1].slice(1, -1);
       nodes.push(<code key={nextKey()} className="md-inline-code">{code}</code>);
     } else if (match[2] !== undefined && match[3]) {
-      // Image: ![alt](url)
-      nodes.push(
-        <img key={nextKey()} className="md-image" src={match[3]} alt={match[2]} />
-      );
+      // Image: ![alt](url) — drop unsafe schemes, fall back to alt/raw text
+      const safe = safeUrl(match[3]);
+      if (safe) {
+        nodes.push(
+          <img key={nextKey()} className="md-image" src={safe} alt={match[2]} />
+        );
+      } else {
+        nodes.push(match[2] || match[3]);
+      }
     } else if (match[4] && match[5]) {
-      // Link: [text](url)
-      nodes.push(
-        <a key={nextKey()} className="md-link" href={match[5]} target="_blank" rel="noopener noreferrer">
-          {match[4]}
-        </a>
-      );
+      // Link: [text](url) — drop unsafe schemes, render as plain text instead
+      const safe = safeUrl(match[5]);
+      if (safe) {
+        nodes.push(
+          <a key={nextKey()} className="md-link" href={safe} target="_blank" rel="noopener noreferrer">
+            {match[4]}
+          </a>
+        );
+      } else {
+        nodes.push(match[4]);
+      }
     } else if (match[6] && match[7]) {
       // Bold+italic: ***text***
       nodes.push(

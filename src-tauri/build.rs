@@ -1,10 +1,12 @@
 fn main() {
     // Embed secrets into the binary at compile time via option_env!()
     // Priority: environment variable > .env file
+    // DEEPGRAM_API_KEY is intentionally NOT embedded: users provide their own
+    // key via Settings → STT. Baking a secret into the distributed binary leaks
+    // it to anyone who runs `strings` on the build.
     let keys = [
         "TELEGRAM_API_ID",
         "TELEGRAM_API_HASH",
-        "DEEPGRAM_API_KEY",
     ];
 
     // Try loading from .env file first (for local dev)

@@ -1,2 +1,0 @@
-Используем mock данные пока не настроим API credentials. 
-В verify_code возвращаем mock user после успешного sign_in.

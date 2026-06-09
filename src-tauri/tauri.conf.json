@@ -14,18 +14,17 @@
       {
         "title": "Vasyapp",
         "width": 1200,
-        "height": 800,
-        "devtools": true
+        "height": 800
       }
     ],
     "security": {
       "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: asset: tauri: http://asset.localhost; connect-src 'self' http://localhost:* https://*",
       "assetProtocol": {
         "enable": true,
-        "scope": ["**"]
+        "scope": ["$APPDATA/media/**"]
       }
     },
-    "withGlobalTauri": true
+    "withGlobalTauri": false
   },
   "bundle": {
     "active": true,

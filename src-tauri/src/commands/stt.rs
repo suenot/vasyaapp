@@ -93,11 +93,10 @@ fn save_settings(app: &AppHandle, settings: &SttSettings) -> Result<(), String> 
 
 #[tauri::command]
 pub async fn get_stt_settings(app: AppHandle) -> Result<SttSettings, String> {
-    let mut settings = load_settings(&app);
-    // Fill in default Deepgram API key from compile-time env if not set
-    if settings.deepgram_api_key.is_none() {
-        settings.deepgram_api_key = option_env!("DEEPGRAM_API_KEY").map(|s| s.to_string());
-    }
+    // Never expose the compile-time Deepgram key to the webview/renderer.
+    // Transcription falls back to the compiled-in key inside `transcribe_deepgram`,
+    // so STT keeps working even though the key is not returned here.
+    let settings = load_settings(&app);
     Ok(settings)
 }
 
@@ -137,6 +136,23 @@ pub async fn transcribe_audio(
             language: None,
             cached: true,
         });
+    }
+
+    // Defense-in-depth: only transcribe files that live inside the app data dir.
+    // Prevents a compromised/abused frontend from sending arbitrary local files
+    // (e.g. ~/.ssh/id_rsa) to the cloud STT provider.
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+    let canonical_base = tokio::fs::canonicalize(&app_data_dir)
+        .await
+        .unwrap_or(app_data_dir);
+    let canonical_target = tokio::fs::canonicalize(&file_path)
+        .await
+        .map_err(|e| format!("Invalid audio file path: {}", e))?;
+    if !canonical_target.starts_with(&canonical_base) {
+        return Err("Audio file path is outside the application data directory".to_string());
     }
 
     let settings = load_settings(&app);
@@ -199,8 +215,8 @@ async fn transcribe_deepgram(
     let api_key = settings
         .deepgram_api_key
         .clone()
-        .or_else(|| option_env!("DEEPGRAM_API_KEY").map(|s| s.to_string()))
-        .ok_or("Deepgram API key not configured")?;
+        .filter(|k| !k.is_empty())
+        .ok_or("Deepgram API key not configured. Add it in Settings → STT, or switch to local Whisper.")?;
 
     let audio_data = tokio::fs::read(file_path)
         .await
