@@ -1,4 +1,5 @@
-import { memo } from 'react';
+import { memo, useEffect, useRef } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { Chat, GlobalSearchResult, GlobalMessageResult } from '../../types/telegram';
 import { ChatListItem } from './ChatListItem';
 import { useTranslation } from '../../i18n';
@@ -71,6 +72,25 @@ export const ChatList = memo(({
   const { t } = useTranslation();
   const chatDensity = useSettingsStore((s) => s.chatDensity);
   const isSearchActive = searchQuery.trim().length > 0;
+
+  // Virtualize the (potentially huge) normal chat list so only visible rows are
+  // in the DOM. Heights are measured per-row (measureElement) since density and
+  // wrapped titles vary; estimate is just for the initial scrollbar.
+  const parentRef = useRef<HTMLDivElement>(null);
+  const rowVirtualizer = useVirtualizer({
+    count: chats.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => (chatDensity === 'very-compact' ? 52 : chatDensity === 'compact' ? 60 : 72),
+    overscan: 8,
+    getItemKey: (index) => chats[index].id,
+  });
+
+  // Keep the keyboard-highlighted row visible when navigating with arrow keys.
+  useEffect(() => {
+    if (!isSearchActive && highlightedIndex >= 0 && highlightedIndex < chats.length) {
+      rowVirtualizer.scrollToIndex(highlightedIndex, { align: 'auto' });
+    }
+  }, [highlightedIndex, isSearchActive, chats.length, rowVirtualizer]);
 
   // When search is active, show sectioned results
   if (isSearchActive) {
@@ -250,7 +270,7 @@ export const ChatList = memo(({
 
   // Normal (non-search) view
   return (
-    <div className={`chat-list density-${chatDensity}`}>
+    <div className={`chat-list density-${chatDensity}`} ref={parentRef}>
         {loading ? (
           <div className="empty-state">
             <p>{t('loading')}</p>
@@ -260,17 +280,28 @@ export const ChatList = memo(({
             <p style={{ color: 'var(--error-color)' }}>{error}</p>
           </div>
         ) : chats.length > 0 ? (
-          chats.map((chat, index) => (
-            <ChatListItem
-              key={chat.id}
-              chat={chat}
-              isSelected={selectedChatId === chat.id}
-              isFavorite={favorites.has(chat.id)}
-              isHighlighted={highlightedIndex === index}
-              onChatClick={onChatClick}
-              onContextMenu={onContextMenu}
-            />
-          ))
+          <div style={{ height: `${rowVirtualizer.getTotalSize()}px`, width: '100%', position: 'relative' }}>
+            {rowVirtualizer.getVirtualItems().map((vi) => {
+              const chat = chats[vi.index];
+              return (
+                <div
+                  key={chat.id}
+                  data-index={vi.index}
+                  ref={rowVirtualizer.measureElement}
+                  style={{ position: 'absolute', top: 0, left: 0, width: '100%', transform: `translateY(${vi.start}px)` }}
+                >
+                  <ChatListItem
+                    chat={chat}
+                    isSelected={selectedChatId === chat.id}
+                    isFavorite={favorites.has(chat.id)}
+                    isHighlighted={highlightedIndex === vi.index}
+                    onChatClick={onChatClick}
+                    onContextMenu={onContextMenu}
+                  />
+                </div>
+              );
+            })}
+          </div>
         ) : searchQuery.trim() ? (
           <div className="empty-state">
             <p>{t('nothing_found')}</p>

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useImperativeHandle, forwardRef, memo, useMemo } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { invoke } from '@tauri-apps/api/core';
 import { useMessagesStore, MessageBase } from '../../store/messagesStore';
 import { useSelectionStore } from '../../store/selectionStore';
@@ -127,20 +128,22 @@ function computeGrouping(messages: MessageBase[]): GroupInfo[] {
 }
 
 // Memoized message item — only re-renders when its own props change
-const MessageItem = memo(({ message, accountId, chatId, isHighlighted, isGroupChat, groupInfo, isSelected, isSelectionMode, renderMarkdown, onToggleSelect, onContextMenu }: {
+const MessageItem = memo(({ message, accountId, chatId, isHighlighted, isGroupChat, isFirstInGroup, isLastInGroup, isSelected, isSelectionMode, renderMarkdown, onToggleSelect, onContextMenu }: {
   message: MessageBase;
   accountId: string;
   chatId: number;
   isHighlighted?: boolean;
   isGroupChat: boolean;
-  groupInfo: GroupInfo;
+  // Grouping flags are passed as primitives (not a per-render object) so memo
+  // does not break — a new message no longer re-renders the whole list.
+  isFirstInGroup: boolean;
+  isLastInGroup: boolean;
   isSelected: boolean;
   isSelectionMode: boolean;
   renderMarkdown: boolean;
   onToggleSelect: (id: number) => void;
   onContextMenu: (e: React.MouseEvent, message: MessageBase) => void;
 }) => {
-  const { isFirstInGroup, isLastInGroup } = groupInfo;
   const showSenderName = isGroupChat && !message.is_outgoing && isFirstInGroup && message.from_user_id;
   const showAvatar = isGroupChat && !message.is_outgoing && isLastInGroup;
   const senderColor = message.from_user_id ? getSenderColor(message.from_user_id) : SENDER_COLORS[0];
@@ -278,13 +281,14 @@ const MessageItem = memo(({ message, accountId, chatId, isHighlighted, isGroupCh
 
 // Memoized merged message item — renders a group of merged messages as one bubble
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-const MergedMessageItem = memo(({ group, accountId: _aid, chatId: _cid, isHighlighted, isGroupChat, groupInfo, isSelected, isSelectionMode, renderMarkdown, onToggleSelect, onContextMenu }: {
+const MergedMessageItem = memo(({ group, accountId: _aid, chatId: _cid, isHighlighted, isGroupChat, isFirstInGroup, isLastInGroup, isSelected, isSelectionMode, renderMarkdown, onToggleSelect, onContextMenu }: {
   group: MergedMessageGroup;
   accountId: string;
   chatId: number;
   isHighlighted?: boolean;
   isGroupChat: boolean;
-  groupInfo: GroupInfo;
+  isFirstInGroup: boolean;
+  isLastInGroup: boolean;
   isSelected: boolean;
   isSelectionMode: boolean;
   renderMarkdown: boolean;
@@ -294,7 +298,6 @@ const MergedMessageItem = memo(({ group, accountId: _aid, chatId: _cid, isHighli
   const [expanded, setExpanded] = useState(false);
   const message = group.display;
   const mergeCount = group.messages.length;
-  const { isFirstInGroup, isLastInGroup } = groupInfo;
   const showSenderName = isGroupChat && !message.is_outgoing && isFirstInGroup && message.from_user_id;
   const showAvatar = isGroupChat && !message.is_outgoing && isLastInGroup;
   const senderColor = message.from_user_id ? getSenderColor(message.from_user_id) : SENDER_COLORS[0];
@@ -442,6 +445,35 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(({ ac
   const mergedGroups = useMergedMessages(messages, mergeEnabled);
   const containerRef = useRef<HTMLDivElement>(null);
   const pendingScrollRef = useRef<number | null>(null);
+
+  // Latest groups accessible from stable callbacks without re-creating them.
+  const mergedGroupsRef = useRef(mergedGroups);
+  mergedGroupsRef.current = mergedGroups;
+
+  // Virtualize the message list: only on-screen bubbles are in the DOM.
+  // Heights vary wildly (text/media/voice/merged/markdown) so each row is
+  // measured (measureElement); the estimate only seeds the initial scrollbar.
+  const rowVirtualizer = useVirtualizer({
+    count: mergedGroups.length,
+    getScrollElement: () => containerRef.current,
+    estimateSize: () => 72,
+    overscan: 6,
+    getItemKey: (index) => {
+      const g = mergedGroups[index];
+      return g.messages.length > 1 ? `merged-${g.display.id}` : g.display.id;
+    },
+  });
+
+  // Scroll to the newest message (bottom of the list).
+  const scrollToBottom = useCallback((behavior: 'auto' | 'smooth' = 'auto') => {
+    const count = mergedGroupsRef.current.length;
+    if (count === 0) return;
+    rowVirtualizer.scrollToIndex(count - 1, { align: 'end', behavior });
+  }, [rowVirtualizer]);
+
+  // When prepending older history, remember the previously-top message id so we
+  // can restore the scroll anchor once the list grows (avoids a jump).
+  const prependAnchorRef = useRef<number | null>(null);
 
   const isGroupChat = chatType === 'group';
 
@@ -698,12 +730,13 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(({ ac
   // Expose scrollToMessage to parent
   useImperativeHandle(ref, () => ({
     scrollToMessage: (messageId: number) => {
-      const el = containerRef.current?.querySelector(`[data-message-id="${messageId}"]`);
-      if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      // If the message is already loaded, scroll its virtualized row into view.
+      const idx = mergedGroupsRef.current.findIndex((g) => g.messages.some((m) => m.id === messageId));
+      if (idx >= 0) {
+        rowVirtualizer.scrollToIndex(idx, { align: 'center' });
         return;
       }
-      // Message not in DOM — load messages around this ID
+      // Not loaded — fetch messages around this ID; the pending effect scrolls.
       pendingScrollRef.current = messageId;
       invoke<Message[]>('get_messages', {
         accountId,
@@ -721,20 +754,30 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(({ ac
         pendingScrollRef.current = null;
       });
     },
-  }), [accountId, chatId]);
+  }), [accountId, chatId, topicId, rowVirtualizer]);
 
-  // Scroll to pending target after messages update
+  // Scroll to a pending target (search jump) once its message is loaded.
   useEffect(() => {
-    if (!pendingScrollRef.current) return;
+    if (pendingScrollRef.current == null) return;
     const targetId = pendingScrollRef.current;
-    requestAnimationFrame(() => {
-      const el = containerRef.current?.querySelector(`[data-message-id="${targetId}"]`);
-      if (el) {
-        el.scrollIntoView({ behavior: 'instant', block: 'center' });
-        pendingScrollRef.current = null;
-      }
-    });
-  }, [messages]);
+    const idx = mergedGroups.findIndex((g) => g.messages.some((m) => m.id === targetId));
+    if (idx >= 0) {
+      pendingScrollRef.current = null;
+      requestAnimationFrame(() => rowVirtualizer.scrollToIndex(idx, { align: 'center' }));
+    }
+  }, [messages, mergedGroups, rowVirtualizer]);
+
+  // After prepending older history, restore the scroll anchor to the message
+  // that was at the top before the prepend.
+  useEffect(() => {
+    if (prependAnchorRef.current == null) return;
+    const anchorId = prependAnchorRef.current;
+    prependAnchorRef.current = null;
+    const idx = mergedGroups.findIndex((g) => g.messages.some((m) => m.id === anchorId));
+    if (idx >= 0) {
+      rowVirtualizer.scrollToIndex(idx, { align: 'start' });
+    }
+  }, [mergedGroups, rowVirtualizer]);
 
   const hasMore = useMessagesStore((s) => s.hasMoreByChat[chatId] ?? true);
   const setMessages = useMessagesStore((s) => s.setMessages);
@@ -743,7 +786,6 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(({ ac
   const removeMessage = useMessagesStore((s) => s.removeMessage);
   const setHasMore = useMessagesStore((s) => s.setHasMore);
 
-  const messagesEndRef = useRef<HTMLDivElement>(null);
   const loadingRef = useRef(false);
   const loadingMoreRef = useRef(false);
   const initialLoadDone = useRef(false);
@@ -785,14 +827,14 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(({ ac
         initialLoadDone.current = true;
         // Force scroll to bottom after initial load, regardless of useEffect race conditions
         setTimeout(() => {
-          messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+          scrollToBottom('auto');
           prevMessagesLength.current = useMessagesStore.getState().messagesByChat[chatId]?.length || 0;
         }, 50);
       }
     };
 
     load();
-  }, [chatId, accountId, setMessages, setHasMore]);
+  }, [chatId, accountId, setMessages, setHasMore, scrollToBottom]);
 
   // Scroll to bottom only on initial load (not on prepend)
   const prevMessagesLength = useRef(0);
@@ -805,15 +847,20 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(({ ac
     if (prevMessagesLength.current === 0 && messages.length > 0) {
       // Use setTimeout to ensure DOM is fully painted
       setTimeout(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+        scrollToBottom('auto');
       }, 0);
     }
     prevMessagesLength.current = messages.length;
-  }, [messages.length]);
+  }, [messages.length, scrollToBottom]);
 
   // Real-time: new message
   useTauriEvent<NewMessageEvent>('telegram:new-message', useCallback((evt) => {
     if (evt.chatId !== chatId) return;
+    // Decide whether to follow the bottom BEFORE the new message grows the list:
+    // only auto-scroll if it's our own message or the user is already near the
+    // bottom — otherwise reading older history is no longer interrupted.
+    const c = containerRef.current;
+    const nearBottom = c ? c.scrollHeight - c.scrollTop - c.clientHeight < 150 : true;
     // Convert event media info to the format expected by the store
     const media = evt.media?.map((m) => ({
       media_type: m.mediaType as any,
@@ -830,7 +877,9 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(({ ac
       is_outgoing: evt.isOutgoing,
       media,
     });
-    setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+    if (evt.isOutgoing || nearBottom) {
+      setTimeout(() => scrollToBottom('smooth'), 50);
+    }
 
     // Auto-mark incoming messages as read since the user is viewing this chat
     if (!evt.isOutgoing) {
@@ -842,7 +891,7 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(({ ac
         console.error('[MessageList] Failed to auto-mark as read:', err);
       });
     }
-  }, [chatId, accountId, addMessage]));
+  }, [chatId, accountId, addMessage, scrollToBottom]));
 
   // Real-time: message deleted
   useTauriEvent<MessageDeletedEvent>('telegram:message-deleted', useCallback((evt) => {
@@ -870,6 +919,9 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(({ ac
       if (older.length === 0) {
         setHasMore(chatId, false);
       } else {
+        // Remember the current top message so the virtualizer can restore the
+        // scroll anchor after the prepended rows grow the list.
+        prependAnchorRef.current = oldest.id;
         prependMessages(chatId, older.reverse());
         setHasMore(chatId, older.length === 50);
       }
@@ -883,8 +935,8 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(({ ac
   // Callback for MessageInput
   const handleMessageSent = useCallback((newMessage: Message) => {
     addMessage(chatId, newMessage);
-    setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
-  }, [chatId, addMessage]);
+    setTimeout(() => scrollToBottom('smooth'), 100);
+  }, [chatId, addMessage, scrollToBottom]);
 
   return (
     <div className="messages-wrapper">
@@ -908,8 +960,13 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(({ ac
         ) : messages.length === 0 ? (
           <div className="messages-empty"><p>No messages in {chatTitle}</p></div>
         ) : (
-          <div className="messages-list">
-            {mergedGroups.map((group, index) => {
+          <div
+            className="messages-list"
+            style={{ height: `${rowVirtualizer.getTotalSize()}px`, position: 'relative', width: '100%' }}
+          >
+            {rowVirtualizer.getVirtualItems().map((vi) => {
+              const group = mergedGroups[vi.index];
+              const index = vi.index;
               const isMerged = group.messages.length > 1;
               const message = group.display;
               // For merged groups, consider selected if ANY constituent is selected
@@ -920,43 +977,56 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(({ ac
                 ? group.messages.some((m) => highlightedMessageId === m.id)
                 : highlightedMessageId === message.id;
 
-              if (isMerged) {
-                return (
-                  <MergedMessageItem
-                    key={`merged-${message.id}`}
-                    group={group}
-                    accountId={accountId}
-                    chatId={chatId}
-                    isHighlighted={isGroupHighlighted}
-                    isGroupChat={isGroupChat}
-                    groupInfo={groupInfos[index]}
-                    isSelected={isGroupSelected}
-                    isSelectionMode={isSelectionMode}
-                    renderMarkdown={shouldRenderMarkdown(message.id, group.mergedText)}
-                    onToggleSelect={toggleMessage}
-                    onContextMenu={handleContextMenu}
-                  />
-                );
-              }
-
               return (
-                <MessageItem
-                  key={message.id}
-                  message={message}
-                  accountId={accountId}
-                  chatId={chatId}
-                  isHighlighted={isGroupHighlighted}
-                  isGroupChat={isGroupChat}
-                  groupInfo={groupInfos[index]}
-                  isSelected={isGroupSelected}
-                  isSelectionMode={isSelectionMode}
-                  renderMarkdown={shouldRenderMarkdown(message.id, message.text)}
-                  onToggleSelect={toggleMessage}
-                  onContextMenu={handleContextMenu}
-                />
+                <div
+                  key={vi.key}
+                  data-index={index}
+                  ref={rowVirtualizer.measureElement}
+                  // flow-root contains the bubbles' margins so measureElement
+                  // captures the full row height (incl. group spacing).
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    transform: `translateY(${vi.start}px)`,
+                    display: 'flow-root',
+                  }}
+                >
+                  {isMerged ? (
+                    <MergedMessageItem
+                      group={group}
+                      accountId={accountId}
+                      chatId={chatId}
+                      isHighlighted={isGroupHighlighted}
+                      isGroupChat={isGroupChat}
+                      isFirstInGroup={groupInfos[index].isFirstInGroup}
+                      isLastInGroup={groupInfos[index].isLastInGroup}
+                      isSelected={isGroupSelected}
+                      isSelectionMode={isSelectionMode}
+                      renderMarkdown={shouldRenderMarkdown(message.id, group.mergedText)}
+                      onToggleSelect={toggleMessage}
+                      onContextMenu={handleContextMenu}
+                    />
+                  ) : (
+                    <MessageItem
+                      message={message}
+                      accountId={accountId}
+                      chatId={chatId}
+                      isHighlighted={isGroupHighlighted}
+                      isGroupChat={isGroupChat}
+                      isFirstInGroup={groupInfos[index].isFirstInGroup}
+                      isLastInGroup={groupInfos[index].isLastInGroup}
+                      isSelected={isGroupSelected}
+                      isSelectionMode={isSelectionMode}
+                      renderMarkdown={shouldRenderMarkdown(message.id, message.text)}
+                      onToggleSelect={toggleMessage}
+                      onContextMenu={handleContextMenu}
+                    />
+                  )}
+                </div>
               );
             })}
-            <div ref={messagesEndRef} />
           </div>
         )}
       </div>
