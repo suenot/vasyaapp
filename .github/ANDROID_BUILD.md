@@ -9,7 +9,6 @@ Go to your repository → **Settings** → **Secrets and variables** → **Actio
 Add these secrets:
 - `TELEGRAM_API_ID` - Your Telegram API ID (e.g., `35898`)
 - `TELEGRAM_API_HASH` - Your Telegram API Hash
-- `DEEPGRAM_API_KEY` - Your Deepgram API key (for STT)
 
 ### 2. Trigger Build
 

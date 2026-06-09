@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.7.6] - 2026-06-10
+### Security
+- Deepgram API key is no longer embedded in the binary — add your own key in Settings → STT (or use local Whisper)
+- Validate transcription file paths (must stay inside app data dir)
+- Mask phone numbers in logs; remove stale `.bak`/patch files
+- Allowlist URL schemes in rendered messages (`http/https/tg/mailto`) — blocks `javascript:`/`data:`/`file:` links
+- Narrow asset protocol scope to the media directory; disable devtools and `withGlobalTauri`
+
+### Performance
+- Virtualized chat list and message list (`@tanstack/react-virtual`) — long chats no longer render thousands of DOM nodes
+- Chat list updates live on incoming messages: preview, unread badge, chat moves to top
+- Fixed re-render hotspots: proper Zustand selectors, rAF-throttled call audio levels, batched avatar updates, memoized translations, stable hotkey handlers
+- Autoscroll on new messages only when already near the bottom
+
+### Mobile (iOS/Android)
+- The app can no longer be dragged down past the top (document rubber-band) — native `WKWebView` bounce disabled + CSS `overscroll-behavior`
+- Pinch/double-tap zoom of the UI is disabled (in-app image viewer zoom still works)
+- Media auto-download is viewport-scoped: only photos/stickers/voice actually on screen are fetched; scrolling away cancels queued downloads; tap-to-download jumps the queue
+
 ## [0.7.5] - 2026-04-02
 ### Bug Fixes
 - Fix settings page on Android — sidebar and content no longer overlap on mobile

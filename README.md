@@ -6,13 +6,13 @@ Cross-platform Telegram client built with Tauri 2.0 + React 19 + TypeScript. Fea
 
 - **Telegram Integration**: Full MTProto support via grammers-client v0.8
 - **Voice Transcription (STT)**:
-  - Cloud: Deepgram Nova-2 (default, fast, accurate)
+  - Cloud: Deepgram Nova-2 — bring your own API key (Settings → STT); no key is embedded in the build
   - Local: Whisper.cpp via sidecar (~1 GB RAM)
   - Auto-transcribe incoming voice messages
   - Multi-language support (Russian, English, Ukrainian, German, French, Spanish)
 - **Media Handling**:
-  - Auto-download for photos/stickers/voice
-  - Click-to-download for videos/documents
+  - Auto-download for photos/stickers/voice — viewport-scoped (only media actually on screen is fetched)
+  - Click-to-download for videos/documents (user downloads jump the queue)
   - Media caching and queue management
   - Paste images directly (Ctrl+V)
 - **Performance**:
@@ -47,10 +47,9 @@ Cross-platform Telegram client built with Tauri 2.0 + React 19 + TypeScript. Fea
 # Install dependencies
 npm install
 
-# Create .env file
+# Create .env file (Deepgram key is NOT a build input — users add it in Settings → STT)
 echo "TELEGRAM_API_ID=your_api_id" >> .env
 echo "TELEGRAM_API_HASH=your_api_hash" >> .env
-echo "DEEPGRAM_API_KEY=your_deepgram_key" >> .env
 
 # Run in development mode
 npm run tauri dev
@@ -72,7 +71,6 @@ cp target/release/stt-sidecar target/release/stt-sidecar-aarch64-apple-darwin
 1. Add repository secrets:
    - `TELEGRAM_API_ID`
    - `TELEGRAM_API_HASH`
-   - `DEEPGRAM_API_KEY`
 2. Push to `main` or trigger workflow manually
 3. Download APK from Artifacts (~15-30 minutes)
 
@@ -98,9 +96,9 @@ npm run tauri android build
 |----------|-------------|----------|
 | `TELEGRAM_API_ID` | Telegram API ID from my.telegram.org | Yes |
 | `TELEGRAM_API_HASH` | Telegram API Hash | Yes |
-| `DEEPGRAM_API_KEY` | Deepgram API key (for STT) | Optional* |
 
-*Required only if using Deepgram STT provider (default)
+The Deepgram API key is a runtime user setting (Settings → STT), not a build
+input — it is never embedded in the binary.
 
 ## 📝 License
 
