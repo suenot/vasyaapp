@@ -18,9 +18,33 @@ static void disableWebViewInputAccessory(void) {
     method_setImplementation(m, newImp);
 }
 
+// The app is a fixed-layout chat UI: the document itself must never scroll or zoom.
+// WKWebView's own UIScrollView still rubber-bands (drag the whole page down past the top)
+// and bounces on zoom regardless of page CSS, so disable that at the native layer.
+// wry creates the WKWebView internally — hook the designated initializer to reach it.
+static void disableWebViewBounce(void) {
+    Class cls = [WKWebView class];
+    SEL sel = @selector(initWithFrame:configuration:);
+    Method m = class_getInstanceMethod(cls, sel);
+    if (!m) return;
+    IMP origImp = method_getImplementation(m);
+    IMP newImp = imp_implementationWithBlock(^id(id _self, CGRect frame, WKWebViewConfiguration *config) {
+        WKWebView *wv = ((id (*)(id, SEL, CGRect, id))origImp)(_self, sel, frame, config);
+        if (wv) {
+            wv.scrollView.bounces = NO;
+            wv.scrollView.alwaysBounceVertical = NO;
+            wv.scrollView.alwaysBounceHorizontal = NO;
+            wv.scrollView.bouncesZoom = NO;
+        }
+        return wv;
+    });
+    method_setImplementation(m, newImp);
+}
+
 int main(int argc, char * argv[]) {
     (void)[WKWebView class]; // ensure WebKit is loaded so WKContentView is registered
     disableWebViewInputAccessory();
+    disableWebViewBounce();
     ffi::start_app();
     return 0;
 }

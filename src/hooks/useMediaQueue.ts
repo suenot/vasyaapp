@@ -42,14 +42,23 @@ class MediaDownloadQueue {
     this.syncStore();
   }
 
-  enqueue(item: Omit<QueueItem, 'resolve' | 'reject'>): Promise<any> {
+  enqueue(item: Omit<QueueItem, 'resolve' | 'reject'>, opts?: { front?: boolean }): Promise<any> {
     const key = `${item.chatId}_${item.messageId}`;
     // Return cached result if a previous download succeeded
     if (this.resultCache.has(key)) {
       return Promise.resolve(this.resultCache.get(key));
     }
-    // Return in-progress promise if download is underway (component remounted)
+    // Return in-progress promise if download is underway (component remounted);
+    // a user-initiated request still bumps the queued item to the front.
     if (this.pendingPromises.has(key)) {
+      if (opts?.front) {
+        const idx = this.queue.findIndex(i => i.chatId === item.chatId && i.messageId === item.messageId);
+        if (idx > 0) {
+          const [qi] = this.queue.splice(idx, 1);
+          this.queue.unshift(qi);
+          this.syncStore();
+        }
+      }
       return this.pendingPromises.get(key)!;
     }
     if (this.seenKeys.has(key)) {
@@ -58,13 +67,28 @@ class MediaDownloadQueue {
     this.seenKeys.add(key);
 
     const promise = new Promise((resolve, reject) => {
-      this.queue.push({ ...item, resolve, reject });
+      const qi = { ...item, resolve, reject };
+      // User-initiated downloads jump ahead of queued viewport auto-downloads.
+      if (opts?.front) this.queue.unshift(qi);
+      else this.queue.push(qi);
       this.syncStore();
       this.processNext();
     });
     this.pendingPromises.set(key, promise);
     promise.finally(() => this.pendingPromises.delete(key));
     return promise;
+  }
+
+  /** Drop a download that is still waiting in the queue (scrolled out of view).
+      Active downloads are left to finish — they land in the result cache. */
+  cancelQueued(chatId: number, messageId: number): boolean {
+    const idx = this.queue.findIndex(i => i.chatId === chatId && i.messageId === messageId);
+    if (idx === -1) return false;
+    const [item] = this.queue.splice(idx, 1);
+    this.seenKeys.delete(`${chatId}_${messageId}`);
+    item.reject('cancelled');
+    this.syncStore();
+    return true;
   }
 
   getStats() {
@@ -130,10 +154,15 @@ const globalQueue = new MediaDownloadQueue();
 
 export function useMediaQueue() {
   return useCallback(
-    (accountId: string, chatId: number, messageId: number) =>
-      globalQueue.enqueue({ accountId, chatId, messageId }),
+    (accountId: string, chatId: number, messageId: number, opts?: { front?: boolean }) =>
+      globalQueue.enqueue({ accountId, chatId, messageId }, opts),
     []
   );
+}
+
+/** Cancel a download that hasn't started yet (e.g. its message left the viewport). */
+export function cancelQueuedDownload(chatId: number, messageId: number): boolean {
+  return globalQueue.cancelQueued(chatId, messageId);
 }
 
 /** Call when user switches to a new chat -- prioritizes that chat's downloads */

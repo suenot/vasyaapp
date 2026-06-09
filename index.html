@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8" />
   <link rel="icon" type="image/svg+xml" href="/vasyapp.svg" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=overlays-content" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=overlays-content" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&display=swap" rel="stylesheet">
@@ -73,6 +73,12 @@
     }
     // Catch the delayed relayout when the webview finally reports real insets.
     [0, 50, 150, 400, 1000, 2000].forEach(function (t) { setTimeout(updateSafeAreaInsets, t); });
+    // This is an app, not a web page: block pinch-zoom of the whole UI. The viewport meta
+    // (maximum-scale=1, user-scalable=no) covers WKWebView/Android WebView; the non-standard
+    // WebKit gesture events are the belt-and-suspenders for any path that still slips through.
+    ['gesturestart', 'gesturechange', 'gestureend'].forEach(function (ev) {
+      document.addEventListener(ev, function (e) { e.preventDefault(); }, { passive: false });
+    });
   </script>
 </head>
 

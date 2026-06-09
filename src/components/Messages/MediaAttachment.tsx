@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { convertFileSrc } from '@tauri-apps/api/core';
-import { useMediaQueue } from '../../hooks/useMediaQueue';
+import { useMediaQueue, cancelQueuedDownload } from '../../hooks/useMediaQueue';
 import { MediaInfo } from '../../types/telegram';
 import { VoiceMessage } from './VoiceMessage';
 import { ImageViewer } from './ImageViewer';
@@ -35,19 +35,24 @@ export const MediaAttachment = ({
 }: MediaAttachmentProps) => {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
+  const [failed, setFailed] = useState(false);
   const [loadedMedia, setLoadedMedia] = useState<MediaInfo | null>(null);
   const [viewerOpen, setViewerOpen] = useState(false);
+  const [inViewport, setInViewport] = useState(false);
+  const placeholderRef = useRef<HTMLDivElement>(null);
   const downloadingRef = useRef(false);
   const downloadMedia = useMediaQueue();
 
   const shouldAutoDownload = AUTO_DOWNLOAD_TYPES.has(media.media_type);
+  const needsDownload = (!media.file_path || media.file_path.trim() === '') && !loadedMedia;
 
   const doDownload = useCallback(async () => {
     if (downloadingRef.current || loadedMedia) return;
     downloadingRef.current = true;
     setLoading(true);
     try {
-      const result = await downloadMedia(accountId, chatId, messageId) as MediaInfo[] | null;
+      // User asked for this file explicitly — jump ahead of queued auto-downloads.
+      const result = await downloadMedia(accountId, chatId, messageId, { front: true }) as MediaInfo[] | null;
       if (result && result.length > 0) {
         setLoadedMedia(result[0]);
       }
@@ -59,35 +64,54 @@ export const MediaAttachment = ({
     }
   }, [accountId, chatId, messageId, loadedMedia, downloadMedia]);
 
-  // Auto-download for photos/stickers/voice on mount
+  // Auto-download is viewport-scoped: track whether the placeholder is actually
+  // on screen. Virtualized rows also mount in the overscan area and transiently
+  // while jumping/flinging through a chat — those must NOT trigger downloads.
+  useEffect(() => {
+    if (!shouldAutoDownload || !needsDownload || failed) return;
+    const el = placeholderRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      (entries) => setInViewport(entries.some((e) => e.isIntersecting)),
+      { rootMargin: '100px 0px' }
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [shouldAutoDownload, needsDownload, failed]);
+
+  // Auto-download for photos/stickers/voice — only while visible (or just off-screen).
   useEffect(() => {
     if (media.media_type === 'webpage') return;
-    if (!shouldAutoDownload) return;
-
-    const needsDownload = !media.file_path || media.file_path.trim() === '';
-    if (!needsDownload || loadedMedia || downloadingRef.current) return;
+    if (!shouldAutoDownload || !needsDownload || !inViewport || failed) return;
+    if (downloadingRef.current) return;
 
     let cancelled = false;
-    downloadingRef.current = true;
+    // Small debounce so scrolling past a photo doesn't enqueue it.
+    const timer = setTimeout(() => {
+      if (cancelled) return;
+      downloadingRef.current = true;
+      setLoading(true);
+      downloadMedia(accountId, chatId, messageId)
+        .then((result: MediaInfo[] | null) => {
+          if (!cancelled && result && result.length > 0) setLoadedMedia(result[0]);
+        })
+        .catch((err) => {
+          if (!cancelled && err !== 'cancelled') setFailed(true);
+        })
+        .finally(() => {
+          downloadingRef.current = false;
+          if (!cancelled) setLoading(false);
+        });
+    }, 150);
 
-    const run = async () => {
-      try {
-        setLoading(true);
-        const result = await downloadMedia(accountId, chatId, messageId) as MediaInfo[] | null;
-        if (!cancelled && result && result.length > 0) {
-          setLoadedMedia(result[0]);
-        }
-      } catch {
-        // Download failed
-      } finally {
-        downloadingRef.current = false;
-        if (!cancelled) setLoading(false);
-      }
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      // Left the viewport: if the download is still waiting in the queue, drop it.
+      // An already-active download finishes and lands in the queue's result cache.
+      cancelQueuedDownload(chatId, messageId);
     };
-
-    run();
-    return () => { cancelled = true; };
-  }, [media.file_path, media.media_type, shouldAutoDownload, accountId, chatId, messageId, loadedMedia, downloadMedia]);
+  }, [inViewport, media.media_type, shouldAutoDownload, needsDownload, failed, accountId, chatId, messageId, downloadMedia]);
 
   const currentMedia = loadedMedia || media;
   const hasFile = currentMedia.file_path && currentMedia.file_path.trim() !== '';
@@ -146,17 +170,17 @@ export const MediaAttachment = ({
     );
   }
 
-  // Auto-download placeholder (loading state for photo/sticker/voice)
+  // Auto-download placeholder (waiting-for-viewport / loading state for photo/sticker/voice)
   if (!hasFile) {
     return (
-      <div className="media-placeholder">
-        {loading ? (
+      <div className="media-placeholder" ref={placeholderRef}>
+        {failed ? (
+          <div>{t('failed_to_load', { type: media.media_type })}</div>
+        ) : (
           <div className="media-download-progress">
             <div className="media-download-spinner" />
             <span>{t('loading_type', { type: media.media_type })}</span>
           </div>
-        ) : (
-          <div>{t('failed_to_load', { type: media.media_type })}</div>
         )}
       </div>
     );

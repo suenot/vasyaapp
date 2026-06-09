@@ -99,10 +99,24 @@ textarea {
   --scroll-thumb: #3A4B5D;
 }
 
+html {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
 body {
   margin: 0;
   padding: 0;
   overflow: hidden;
+  /* App, not a web page: pin the body so the document itself can never be dragged
+     past the top (iOS rubber-band), and let inner lists own all scrolling. */
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overscroll-behavior: none;
+  /* Allow pan/pinch handled by elements, but kill browser double-tap-to-zoom. */
+  touch-action: manipulation;
   color: var(--text-primary);
   background-color: var(--bg-primary);
   font-smoothing: antialiased;
