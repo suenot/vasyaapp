@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.7.7] - 2026-06-10
+### Security
+- **Telegram sessions are now encrypted at rest** (ChaCha20-Poly1305). The master key lives in the OS keychain (Keychain / Credential Manager), with a 0600 key-file fallback. Existing plaintext sessions are migrated automatically on first launch and the plaintext file is deleted.
+- **Per-user account isolation on the sync backend**: data routes accept a personal JWT and an account is bound to the first user who syncs it; other users get 403. Legacy shared-API-key mode still works unless `REQUIRE_USER_AUTH=true`.
+- Rate limiting on backend login/register (per-IP); `JWT_SECRET` fails fast if set but shorter than 32 chars.
+- Calls are now behind an off-by-default "Experimental" toggle (VoIP audio is not end-to-end encrypted yet).
+- Local Whisper is the default STT provider — no audio leaves the device unless you opt into Deepgram.
+- Tightened CSP (`object-src`/`frame-src 'none'`, `base-uri`/`form-action 'self'`).
+
+### Features
+- **My QR Code**: share your contact via a `t.me` QR like the native Telegram app (sidebar header → QR icon).
+- Backend account sign-in/registration in Settings → Storage (issues the JWT used for synced data).
+
+### Performance
+- File sending uses raw IPC (binary body) instead of a JSON number array — ~4× smaller bridge payload.
+
 ## [0.7.6] - 2026-06-10
 ### Security
 - Deepgram API key is no longer embedded in the binary — add your own key in Settings → STT (or use local Whisper)

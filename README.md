@@ -1,5 +1,7 @@
 # VasyApp - Telegram Client
 
+![Vasya and the "Vasya.app, not WhatsApp" story](docs/assets/vasya-comic.jpg)
+
 Cross-platform Telegram client built with Tauri 2.0 + React 19 + TypeScript. Features voice transcription, media handling, and optimized message loading.
 
 ## ✨ Features
