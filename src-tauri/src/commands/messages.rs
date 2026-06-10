@@ -402,22 +402,53 @@ pub async fn send_message(
         media: extract_media_info(&sent_message),
     })
 }
-/// Send media to a chat
+/// Send media to a chat.
+///
+/// The file content arrives as the RAW IPC body (`InvokeBody::Raw`) instead of
+/// a JSON `number[]` — that path serialized every byte as decimal text (~4x the
+/// size) and parsed it back on the Rust side. Metadata travels in request
+/// headers; `file_name`/`caption` are percent-encoded by the frontend since
+/// HTTP header values must be ASCII.
 #[tauri::command]
 pub async fn send_media(
-    account_id: String,
-    chat_id: i64,
-    media_bytes: Vec<u8>,
-    file_name: String,
-    mime_type: String,
-    caption: Option<String>,
+    request: tauri::ipc::Request<'_>,
     app: tauri::AppHandle,
     state: State<'_, Arc<RwLock<AppState>>>,
 ) -> Result<Message, String> {
+    use percent_encoding::percent_decode_str;
+
+    let tauri::ipc::InvokeBody::Raw(media_bytes) = request.body() else {
+        return Err("send_media expects a raw (binary) request body".into());
+    };
+
+    let header = |name: &str| -> Option<String> {
+        request
+            .headers()
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string())
+    };
+    let decoded = |value: String| -> Result<String, String> {
+        percent_decode_str(&value)
+            .decode_utf8()
+            .map(|s| s.to_string())
+            .map_err(|_| "Invalid percent-encoding in header".to_string())
+    };
+
+    let account_id = header("x-account-id").ok_or("missing x-account-id header")?;
+    let chat_id: i64 = header("x-chat-id")
+        .ok_or("missing x-chat-id header")?
+        .parse()
+        .map_err(|_| "invalid x-chat-id header")?;
+    let file_name = decoded(header("x-file-name").ok_or("missing x-file-name header")?)?;
+    let mime_type = header("x-mime-type").unwrap_or_else(|| "application/octet-stream".into());
+    let caption = header("x-caption").map(decoded).transpose()?;
+
     tracing::info!(
         account_id = %account_id,
         chat_id = chat_id,
         file_name = %file_name,
+        size = media_bytes.len(),
         "Sending media"
     );
 

@@ -153,17 +153,19 @@ export const MessageInput = ({ accountId, chatId, topicId, onMessageSent }: Mess
   }, []);
 
   const sendMediaBytes = useCallback(async (file: File, captionText: string) => {
+    // Raw IPC body: bytes go over the bridge as-is instead of a JSON number
+    // array (~4x smaller payload, no per-byte parsing). Metadata rides in
+    // headers; values are percent-encoded because headers must be ASCII.
     const buffer = await file.arrayBuffer();
-    const bytes = Array.from(new Uint8Array(buffer));
+    const headers: Record<string, string> = {
+      'x-account-id': accountId,
+      'x-chat-id': String(chatId),
+      'x-file-name': encodeURIComponent(file.name),
+      'x-mime-type': file.type || 'application/octet-stream',
+    };
+    if (captionText) headers['x-caption'] = encodeURIComponent(captionText);
 
-    return invoke<Message>('send_media', {
-      accountId,
-      chatId,
-      mediaBytes: bytes,
-      fileName: file.name,
-      mimeType: file.type || 'application/octet-stream',
-      caption: captionText || undefined,
-    });
+    return invoke<Message>('send_media', new Uint8Array(buffer), { headers });
   }, [accountId, chatId]);
 
   const handleSend = useCallback(async () => {
