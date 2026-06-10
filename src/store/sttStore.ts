@@ -54,7 +54,9 @@ const TRANSCRIBING_SET = new Set<string>();
 
 export const useSttStore = create<SttState>((set, get) => ({
   settings: {
-    provider: 'deepgram',
+    // Placeholder until loadSettings() fetches the persisted value from Rust;
+    // mirrors the Rust default (local Whisper — privacy-first).
+    provider: 'local_whisper',
     deepgram_api_key: null,
     whisper_model: 'small',
     language: 'ru',

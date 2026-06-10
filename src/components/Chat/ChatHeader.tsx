@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { Chat, Message } from '../../types/telegram';
 import { useConnectionStore } from '../../store/connectionStore';
 import { useMuteStore } from '../../store/muteStore';
+import { useSettingsStore } from '../../store/settingsStore';
 import { useCallStore } from '../../store/callStore';
 import { useDebounce } from '../../hooks/useDebounce';
 import { useTranslation, TranslationKey } from '../../i18n';
@@ -34,6 +35,7 @@ export const ChatHeader = forwardRef<ChatHeaderHandle, ChatHeaderProps>(({ chat,
   // function — otherwise the Mute/Unmute label never updates reactively.
   const mutedChats = useMuteStore((s) => s.mutedChats);
   const toggleMute = useMuteStore((s) => s.toggleMute);
+  const experimentalCalls = useSettingsStore((s) => s.experimentalCalls);
   const [showSearch, setShowSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Message[]>([]);
@@ -194,7 +196,7 @@ export const ChatHeader = forwardRef<ChatHeaderHandle, ChatHeaderProps>(({ chat,
               </div>
             </div>
             <div className="content-header-actions">
-              {chat.chatType === 'user' ? (
+              {!experimentalCalls ? null : chat.chatType === 'user' ? (
                 <>
                   <button
                     className="icon-button"

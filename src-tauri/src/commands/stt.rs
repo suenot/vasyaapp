@@ -18,7 +18,9 @@ pub enum SttProvider {
 
 impl Default for SttProvider {
     fn default() -> Self {
-        SttProvider::Deepgram
+        // Local Whisper by default: no audio leaves the machine unless the user
+        // explicitly switches to Deepgram and provides their own API key.
+        SttProvider::LocalWhisper
     }
 }
 
@@ -34,7 +36,7 @@ pub struct SttSettings {
 impl Default for SttSettings {
     fn default() -> Self {
         Self {
-            provider: SttProvider::Deepgram,
+            provider: SttProvider::default(),
             deepgram_api_key: None,
             whisper_model: "small".to_string(),
             language: "ru".to_string(),

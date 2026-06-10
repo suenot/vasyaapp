@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
+import { useSettingsStore } from './settingsStore';
 
 export type CallStateEnum =
   | 'idle'
@@ -230,6 +231,10 @@ export const useCallStore = create<CallStore>()((set, get) => ({
     unlisteners.push(
       listen<{ callId: number; accessHash: number; userId: number; userName: string; isVideo: boolean; accountId: string }>('telegram:incoming-call', (event) => {
         console.log('[CallStore] telegram:incoming-call', event.payload);
+        // Calls are experimental (VoIP encryption is a stub). With the flag off
+        // we don't surface the incoming-call UI at all — the call keeps ringing
+        // on the user's other Telegram clients.
+        if (!useSettingsStore.getState().experimentalCalls) return;
         set({
           incomingCall: {
             callId: event.payload.callId,

@@ -34,6 +34,9 @@ interface SettingsStore {
   notificationsEnabled: boolean;
   notificationSound: boolean;
   messagePreview: boolean;
+  // Calls are experimental: the VoIP transport has no real encryption yet,
+  // so the whole feature is opt-in and hidden by default.
+  experimentalCalls: boolean;
 
   setApiCredentials: (apiId: string, apiHash: string) => void;
   markConfigured: () => void;
@@ -49,6 +52,7 @@ interface SettingsStore {
   setNotificationsEnabled: (enabled: boolean) => void;
   setNotificationSound: (enabled: boolean) => void;
   setMessagePreview: (enabled: boolean) => void;
+  setExperimentalCalls: (enabled: boolean) => void;
 }
 
 export const useSettingsStore = create<SettingsStore>()(
@@ -72,6 +76,7 @@ export const useSettingsStore = create<SettingsStore>()(
       notificationsEnabled: true,
       notificationSound: true,
       messagePreview: true,
+      experimentalCalls: false,
 
       setApiCredentials: (apiId, apiHash) => set({
         apiId,
@@ -121,6 +126,7 @@ export const useSettingsStore = create<SettingsStore>()(
       setNotificationsEnabled: (enabled) => set({ notificationsEnabled: enabled }),
       setNotificationSound: (enabled) => set({ notificationSound: enabled }),
       setMessagePreview: (enabled) => set({ messagePreview: enabled }),
+      setExperimentalCalls: (enabled) => set({ experimentalCalls: enabled }),
     }),
     {
       name: 'telegram-settings',
