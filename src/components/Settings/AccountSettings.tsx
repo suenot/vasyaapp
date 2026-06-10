@@ -104,7 +104,7 @@ export const AccountSettings = ({ onClose }: AccountSettingsProps) => {
   const [selectedChatTypes, setSelectedChatTypes] = useState<ChatTypeFilter[]>([]);
   const [selectedIcon, setSelectedIcon] = useState<string>('folder');
 
-  const { folderLayout, setFolderLayout, chatDensity, setChatDensity, mergeMessages, setMergeMessages, interfaceScale, setInterfaceScale, notificationsEnabled, setNotificationsEnabled, notificationSound, setNotificationSound, messagePreview, setMessagePreview, messageTextSize, setMessageTextSize } = useSettingsStore();
+  const { folderLayout, setFolderLayout, chatDensity, setChatDensity, mergeMessages, setMergeMessages, interfaceScale, setInterfaceScale, notificationsEnabled, setNotificationsEnabled, notificationSound, setNotificationSound, messagePreview, setMessagePreview, messageTextSize, setMessageTextSize, experimentalCalls, setExperimentalCalls } = useSettingsStore();
 
   const folderIcons: IconName[] = [
     'folder', 'all', 'contacts', 'chats', 'favorites', 
@@ -118,6 +118,45 @@ export const AccountSettings = ({ onClose }: AccountSettingsProps) => {
   const [tempApiKey, setTempApiKey] = useState(backendApiKey);
   const [tempStorageMode, setTempStorageMode] = useState<StorageMode>(storageMode);
   const [urlValidationError, setUrlValidationError] = useState<string | null>(null);
+  // Backend user account (per-user sync isolation): login/register issues a JWT
+  // that is used as the Bearer token instead of the legacy shared API key.
+  const [backendEmail, setBackendEmail] = useState('');
+  const [backendPassword, setBackendPassword] = useState('');
+  const [backendAuthBusy, setBackendAuthBusy] = useState(false);
+  const [backendAuthMessage, setBackendAuthMessage] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const backendAuth = async (mode: 'login' | 'register') => {
+    const base = tempBackendUrl.trim().replace(/\/+$/, '');
+    if (!base) {
+      setBackendAuthMessage({ ok: false, text: t('storage_backend_url_placeholder' as any) });
+      return;
+    }
+    setBackendAuthBusy(true);
+    setBackendAuthMessage(null);
+    try {
+      const res = await fetch(`${base}/api/auth/${mode}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: backendEmail.trim(), password: backendPassword }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setBackendAuthMessage({ ok: false, text: body?.error || `HTTP ${res.status}` });
+        return;
+      }
+      if (body?.token) {
+        setTempApiKey(body.token);
+        setBackendPassword('');
+        setBackendAuthMessage({ ok: true, text: t('backend_auth_token_filled' as any) });
+      } else {
+        setBackendAuthMessage({ ok: false, text: 'No token in response' });
+      }
+    } catch (err) {
+      setBackendAuthMessage({ ok: false, text: String(err) });
+    } finally {
+      setBackendAuthBusy(false);
+    }
+  };
 
   useEffect(() => {
     if (activeSection === 'stt') {
@@ -341,6 +380,20 @@ export const AccountSettings = ({ onClose }: AccountSettingsProps) => {
           </div>
           <label className="toggle-switch">
             <input type="checkbox" checked={messagePreview} disabled={!notificationsEnabled} onChange={(e) => setMessagePreview(e.target.checked)} />
+            <span className="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <div className="settings-group">
+        <h3>{t('experimental' as any)}</h3>
+        <div className="settings-item toggle">
+          <div className="settings-item-label">
+            <div className="settings-item-title">{t('experimental_calls' as any)}</div>
+            <div className="settings-item-description">{t('experimental_calls_desc' as any)}</div>
+          </div>
+          <label className="toggle-switch">
+            <input type="checkbox" checked={experimentalCalls} onChange={(e) => setExperimentalCalls(e.target.checked)} />
             <span className="toggle-slider"></span>
           </label>
         </div>
@@ -1050,6 +1103,55 @@ export const AccountSettings = ({ onClose }: AccountSettingsProps) => {
               autoCapitalize="off"
               spellCheck={false}
             />
+          </div>
+          <div className="settings-group">
+            <h3>{t('backend_account' as any)}</h3>
+            <p className="stt-provider-desc" style={{ marginTop: 4 }}>{t('backend_account_desc' as any)}</p>
+            <input
+              type="email"
+              className="stt-language-select"
+              style={{ width: '100%', margin: '8px 0' }}
+              value={backendEmail}
+              onChange={(e) => setBackendEmail(e.target.value)}
+              placeholder="email@example.com"
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
+            />
+            <input
+              type="password"
+              className="stt-language-select"
+              style={{ width: '100%', margin: '8px 0' }}
+              value={backendPassword}
+              onChange={(e) => setBackendPassword(e.target.value)}
+              placeholder={t('backend_password_placeholder' as any)}
+              autoComplete="new-password"
+            />
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                className="stt-model-download-btn"
+                disabled={backendAuthBusy || !backendEmail.trim() || backendPassword.length < 8}
+                onClick={() => backendAuth('login')}
+              >
+                {t('backend_sign_in' as any)}
+              </button>
+              <button
+                className="stt-model-download-btn"
+                disabled={backendAuthBusy || !backendEmail.trim() || backendPassword.length < 8}
+                onClick={() => backendAuth('register')}
+              >
+                {t('backend_register' as any)}
+              </button>
+            </div>
+            {backendAuthMessage && (
+              <div
+                className={backendAuthMessage.ok ? 'stt-model-downloaded' : 'form-error'}
+                style={{ marginTop: 8, fontSize: 13 }}
+              >
+                {backendAuthMessage.text}
+              </div>
+            )}
           </div>
         </>
       )}
