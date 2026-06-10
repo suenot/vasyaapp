@@ -1,0 +1,83 @@
+.qr-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.qr-card {
+  position: relative;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border-radius: 16px;
+  padding: 28px 32px 24px;
+  max-width: 320px;
+  width: calc(100% - 48px);
+  text-align: center;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+}
+
+.qr-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  color: var(--text-secondary);
+  padding: 6px;
+  border-radius: 50%;
+}
+
+.qr-close:hover {
+  background: var(--bg-secondary);
+}
+
+.qr-title {
+  margin: 0 0 16px;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.qr-code-box {
+  display: inline-flex;
+  padding: 12px;
+  background: #fff;
+  border-radius: 12px;
+}
+
+.qr-name {
+  margin-top: 14px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.qr-handle {
+  margin-top: 2px;
+  font-size: 14px;
+  color: var(--accent-color);
+}
+
+.qr-hint {
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.qr-hint-warn {
+  color: #e8a838;
+}
+
+.qr-copy-btn {
+  margin-top: 14px;
+  padding: 8px 18px;
+  border-radius: 8px;
+  background: var(--accent-color);
+  color: #fff;
+  font-size: 14px;
+}
+
+.qr-copy-btn:hover {
+  background: var(--accent-hover);
+}

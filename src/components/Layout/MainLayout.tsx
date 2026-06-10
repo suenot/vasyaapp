@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { AccountSettings } from '../Settings/AccountSettings';
+import { MyQrCode } from '../Profile/MyQrCode';
 import { AccountSwitcher } from '../Accounts/AccountSwitcher';
 import { MessageList, MessageListHandle } from '../Messages/MessageList';
 import { prioritizeChat } from '../../hooks/useMediaQueue';
@@ -43,6 +44,7 @@ export const MainLayout = () => {
   const [error, setError] = useState('');
   const [selectedChatId, setSelectedChatId] = useState<number | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [showMyQr, setShowMyQr] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<string>('all');
   const folderLayout = useSettingsStore((s) => s.folderLayout);
@@ -927,6 +929,17 @@ export const MainLayout = () => {
                 />
               </div>
               {!isSearchExpanded && (
+                <button className="icon-button" title={t('my_qr_code' as any)} onClick={() => setShowMyQr(true)}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="3" width="7" height="7" rx="1" />
+                    <rect x="14" y="3" width="7" height="7" rx="1" />
+                    <rect x="3" y="14" width="7" height="7" rx="1" />
+                    <path d="M14 14h3v3h-3z" />
+                    <path d="M21 14v.01M14 21v.01M21 21h-3.5" />
+                  </svg>
+                </button>
+              )}
+              {!isSearchExpanded && (
                 <button className="icon-button" title={t('settings')} onClick={() => setShowSettings(true)}>
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M12.22 2h-.44a2 2 0 00-2 2v.18a2 2 0 01-1 1.73l-.43.25a2 2 0 01-2 0l-.15-.08a2 2 0 00-2.73.73l-.22.38a2 2 0 00.73 2.73l.15.1a2 2 0 011 1.72v.51a2 2 0 01-1 1.74l-.15.09a2 2 0 00-.73 2.73l.22.38a2 2 0 002.73.73l.15-.08a2 2 0 012 0l.43.25a2 2 0 011 1.73V20a2 2 0 002 2h.44a2 2 0 002-2v-.18a2 2 0 011-1.73l.43-.25a2 2 0 012 0l.15.08a2 2 0 002.73-.73l.22-.39a2 2 0 00-.73-2.73l-.15-.08a2 2 0 01-1-1.74v-.5a2 2 0 011-1.74l.15-.09a2 2 0 00.73-2.73l-.22-.38a2 2 0 00-2.73-.73l-.15.08a2 2 0 01-2 0l-.43-.25a2 2 0 01-1-1.73V4a2 2 0 00-2-2z" />
@@ -1010,6 +1023,7 @@ export const MainLayout = () => {
       </main>
 
       {showSettings && <AccountSettings onClose={() => setShowSettings(false)} />}
+      {showMyQr && <MyQrCode onClose={() => setShowMyQr(false)} />}
 
       {
         contextMenu && (() => {
