@@ -1,0 +1,209 @@
+# vasya-server
+
+Telegram session host: an axum REST API over the `vasya-core` engine.
+Built as a **library** (router builder) plus a thin standalone **binary**, so
+the same router can run standalone on a server (JWT auth, Postgres-less
+file-backed ownership) or be mounted in-process by the desktop app on
+127.0.0.1 (embedded-local token auth) for local AI agents.
+
+## Layout
+
+| Piece | Purpose |
+|---|---|
+| `vasya_server::build_context(manager, options)` | assemble shared state around any `TelegramClientManager` |
+| `vasya_server::build_router(ctx)` | the complete `/api/v1` axum Router |
+| `vasya_server::start_existing_sessions(ctx)` | load sessions from disk + start update pumps |
+| `ctx.events` (`BroadcastEventSink`) | in-process event bus; SSE at `/api/v1/events`, GraphQL subscriptions consume the same bus (Phase 3) |
+| `src/main.rs` | env-configured standalone server |
+
+Auth modes: `AuthMode::Jwt { secret }` (HS256, same `Claims` as `backend/`,
+share `JWT_SECRET` to accept its tokens) or `AuthMode::EmbeddedLocal { token }`
+(single local user, no database). Account ownership is per-user, claim-on-first-touch,
+persisted to `data_dir/accounts.json`.
+
+Anti-flood: token bucket per account on mutating routes (burst 10, 1 token/2s,
+`RateLimitConfig`) + FLOOD_WAIT absorb-and-retry; both surface as HTTP 429
+with `Retry-After`. Agent keys get a second, stricter per-key bucket
+(burst 5, 1 token/5s, `ServerOptions.agent_rate_limit`).
+
+Phase-2 stubs (501): 1:1 calls, group calls, STT, storage-mode.
+
+## Agent-native layer
+
+AI agents are first-class clients with their own scoped credentials
+(plan §4.4) — never borrowed human sessions:
+
+```sh
+# create a key (human session required; the secret is shown ONCE)
+curl -s -H "$TOK" -H 'content-type: application/json' \
+  -d '{"name":"my-bot","scopes":["accounts:read","chats:read","messages:read","messages:send"],"ttlSecs":2592000}' \
+  $BASE/agent-keys
+# -> {"id":"ak..","secret":"vk_ak.._..", ...}
+curl -s -H "$TOK" $BASE/agent-keys            # list (no secrets)
+curl -s -H "$TOK" $BASE/agent-keys/scopes     # valid scope names
+curl -s -X DELETE -H "$TOK" $BASE/agent-keys/<id>   # revoke
+```
+
+The `vk_...` secret is a normal bearer token; only a SHA-256 hash is stored.
+Out-of-scope calls get 403 with the missing scope named. Agent keys cannot
+manage keys, read the audit log, or use GraphQL (REST/MCP only this phase).
+
+Audit: every mutating call (user or agent) is appended to
+`data_dir/audit.log` — `GET /api/v1/audit?limit=` (human only) reads it.
+
+Idempotency: send an `Idempotency-Key` header on mutating routes; repeats
+within 24h replay the original response with `Idempotency-Replayed: true`;
+concurrent duplicates get 409.
+
+### vasya-mcp
+
+`../vasya-mcp` is a thin stdio MCP server wrapping this API (13 read/write
+tools: list_accounts, list_chats, get_messages, send_message, search, …).
+
+```sh
+cd ../vasya-mcp && npm install && npm run build
+VASYA_API_URL=http://127.0.0.1:8787 VASYA_AGENT_KEY=vk_... node dist/index.js
+```
+
+Claude Desktop / any MCP client config:
+
+```json
+{ "mcpServers": { "vasya": {
+    "command": "node",
+    "args": ["<repo>/app/src-tauri/vasya-mcp/dist/index.js"],
+    "env": { "VASYA_API_URL": "http://127.0.0.1:8787", "VASYA_AGENT_KEY": "vk_..." } } } }
+```
+
+## Run (standalone)
+
+```sh
+cd app/src-tauri
+SESSION_MASTER_KEY=$(openssl rand -hex 32)   # in production: injected from KMS/secret manager
+export SESSION_MASTER_KEY
+export TELEGRAM_API_ID=...                   # https://my.telegram.org
+export TELEGRAM_API_HASH=...
+export AUTH_MODE=embedded                    # simplest mode for a smoke test
+cargo run -p vasya-server
+# prints: VASYA_LOCAL_TOKEN=<64 hex> — the bearer token for all requests
+```
+
+JWT mode instead: `AUTH_MODE=jwt JWT_SECRET=<same secret as backend/>`; get a
+token from the sync backend's login endpoint.
+
+## Manual smoke test
+
+```sh
+BASE=http://127.0.0.1:8787/api/v1
+TOK="Authorization: Bearer $VASYA_LOCAL_TOKEN"
+
+# 1. Liveness + machine-readable contract (no auth)
+curl -s $BASE/health                          # {"status":"ok"}
+curl -s $BASE/openapi.json | head -c 300
+
+# 2. Auth gate: 401 without/with wrong token
+curl -s -o /dev/null -w '%{http_code}\n' $BASE/accounts            # 401
+curl -s -H "$TOK" $BASE/accounts                                   # []
+
+# 3. Telegram login (sends a real code to the phone!)
+curl -s -H "$TOK" -H 'content-type: application/json' \
+  -d '{"phone":"+1555..."}' $BASE/telegram/login/code
+# -> {"accountId":"<uuid>","phone":"+1555..."}
+curl -s -H "$TOK" -H 'content-type: application/json' \
+  -d '{"accountId":"<uuid>","code":"12345"}' $BASE/telegram/login/verify
+# -> {"status":"authorized","user":{...}} or {"status":"password_required"}
+# if 2FA: -d '{"accountId":"<uuid>","password":"..."}' $BASE/telegram/login/password
+
+# 4. Realtime: subscribe before loading chats, watch chat-loaded events stream
+curl -sN -H "$TOK" "$BASE/events" &
+ACC=<uuid>
+curl -s -X POST -H "$TOK" $BASE/accounts/$ACC/chats/load           # 202
+
+# 5. Data routes
+curl -s -H "$TOK" "$BASE/accounts/$ACC/chats" | head -c 500
+curl -s -H "$TOK" "$BASE/accounts/$ACC/chats/<chat_id>/messages?limit=5"
+curl -s -X POST -H "$TOK" -H 'content-type: application/json' \
+  -d '{"text":"hello from vasya-api"}' $BASE/accounts/$ACC/chats/<chat_id>/messages
+
+# 6. Media upload (raw body + headers)
+curl -s -X POST -H "$TOK" \
+  -H 'x-file-name: photo.jpg' -H 'x-mime-type: image/jpeg' \
+  --data-binary @photo.jpg $BASE/accounts/$ACC/chats/<chat_id>/media
+
+# 7. Rate limit: >10 rapid sends -> 429 with Retry-After
+for i in $(seq 1 12); do curl -s -o /dev/null -w '%{http_code} ' -X POST -H "$TOK" \
+  -H 'content-type: application/json' -d '{"text":"spam '$i'"}' \
+  $BASE/accounts/$ACC/chats/<chat_id>/messages; done; echo
+
+# 8. Stubs report 501
+curl -s -o /dev/null -w '%{http_code}\n' -X POST -H "$TOK" $BASE/accounts/$ACC/calls/request
+
+# 9. Restart the server: sessions reload from disk (encrypted with
+#    SESSION_MASTER_KEY), GET /accounts shows the account again.
+```
+
+## GraphQL
+
+Endpoints (same bearer auth as REST for HTTP; WS authenticates on
+`connection_init`):
+
+| Route | What |
+|---|---|
+| `POST /api/v1/graphql` | queries + mutations (REST parity: accounts, chats, messages, search, topics, folders/tabs, telegram login) |
+| `GET /api/v1/graphql/ws` | subscriptions, `graphql-transport-ws` + legacy `graphql-ws` protocols |
+| `GET /api/v1/graphql/sdl` | schema SDL (public, like /openapi.json) |
+| `GET /api/v1/graphql/playground` | dev playground — only with `VASYA_GRAPHQL_PLAYGROUND=1` |
+
+Subscriptions: `messageReceived(accountId, chatId?)`, `messageEdited`,
+`messageDeleted`, `chatUpdated`, `chatsLoadingProgress`, `connectionStatus`,
+`callEvent`, `groupCallEvent`, `sttProgress`. Every item is
+`{ event, payload }` where `event` is the original Tauri-compatible event
+name and `payload` is byte-identical to the desktop event payload.
+
+### Subscribing to messageReceived over WebSocket
+
+With [wscat](https://github.com/websockets/wscat) (graphql-transport-ws
+protocol — note the subprotocol header and the token inside
+`connection_init`, not an HTTP header):
+
+```sh
+wscat -c ws://127.0.0.1:8787/api/v1/graphql/ws -s graphql-transport-ws
+> {"type":"connection_init","payload":{"Authorization":"Bearer <token>"}}
+< {"type":"connection_ack"}
+> {"id":"1","type":"subscribe","payload":{"query":"subscription { messageReceived(accountId: \"<uuid>\") { event payload } }"}}
+# now send the account a Telegram message; each one arrives as:
+< {"id":"1","type":"next","payload":{"data":{"messageReceived":{"event":"telegram:new-message","payload":{"id":123,"chatId":456,"text":"hi","accountId":"<uuid>", "...":"..."}}}}}
+```
+
+From JS with [`graphql-ws`](https://github.com/enisdenjo/graphql-ws):
+
+```js
+import { createClient } from "graphql-ws";
+
+const client = createClient({
+  url: "ws://127.0.0.1:8787/api/v1/graphql/ws",
+  connectionParams: { Authorization: `Bearer ${token}` },
+});
+
+client.subscribe(
+  { query: `subscription { messageReceived(accountId: "${acc}") { event payload } }` },
+  { next: ({ data }) => console.log(data.messageReceived.payload), error: console.error, complete: () => {} },
+);
+```
+
+Query/mutation smoke over HTTP:
+
+```sh
+curl -s -H "$TOK" -H 'content-type: application/json' \
+  -d '{"query":"{ accounts { accountId phone connected } }"}' $BASE/graphql
+curl -s -H "$TOK" -H 'content-type: application/json' \
+  -d '{"query":"mutation { sendMessage(accountId: \"<uuid>\", chatId: <id>, text: \"via graphql\") { id date } }"}' $BASE/graphql
+```
+
+## Embedding in the desktop app (task #8 sketch)
+
+```rust
+let ctx = vasya_server::build_context(app_manager.clone(), ServerOptions::new(
+    AuthMode::embedded_with_random_token(), data_dir))?;
+// Update pumps: use vasya_core::events::MultiEventSink to emit to both the
+// webview (TauriEventSink) and ctx.events, then serve build_router(ctx) on 127.0.0.1.
+```

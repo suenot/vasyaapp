@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { convertFileSrc } from '@tauri-apps/api/core';
+import { convertFileSrc } from '../../transport';
 import { useMediaQueue, cancelQueuedDownload } from '../../hooks/useMediaQueue';
 import { MediaInfo } from '../../types/telegram';
 import { VoiceMessage } from './VoiceMessage';

@@ -1,0 +1,69 @@
+# Multi-stage build of the vasya-server binary (Telegram session host).
+#
+# Build context = app/src-tauri (this directory): the cargo workspace root.
+# Referenced from backend/deploy/docker-compose.prod.yml with
+# `context: ../../app/src-tauri`, which requires the monorepo layout
+# (<root>/backend + <root>/app) on the deploy host — see deploy/README.md.
+#
+# The workspace root package is the Tauri app; it is NEVER compiled here —
+# `cargo build -p vasya-server` only builds vasya-server + vasya-core, and
+# cargo neither downloads nor compiles the tauri dependency tree for that.
+# Root src/ is copied solely because cargo must discover every workspace
+# member's targets to load the workspace.
+
+FROM rust:1-slim-bookworm AS builder
+WORKDIR /ws
+
+# Tolerate slow/flaky registry connections (container networks often are).
+ENV CARGO_NET_RETRY=10 \
+    CARGO_HTTP_TIMEOUT=120 \
+    CARGO_HTTP_LOW_SPEED_LIMIT=1
+
+# Dependency layer: manifests + skeleton sources so source edits don't
+# invalidate the compiled-dependencies cache (same trick as backend/Dockerfile).
+COPY Cargo.toml Cargo.lock ./
+COPY vasya-core/Cargo.toml vasya-core/Cargo.toml
+COPY vasya-server/Cargo.toml vasya-server/Cargo.toml
+RUN mkdir -p src vasya-core/src vasya-server/src \
+    && echo 'fn main() {}' > src/main.rs \
+    && touch src/lib.rs \
+    && touch vasya-core/src/lib.rs \
+    && echo 'fn main() {}' > vasya-server/src/main.rs \
+    && touch vasya-server/src/lib.rs
+# Network and compile as separate layers: a flaky registry or an interrupted
+# build resumes from the cached download instead of refetching everything.
+RUN cargo fetch --locked
+RUN cargo build --release --locked --offline -p vasya-server \
+    && rm -rf src vasya-core/src vasya-server/src
+
+COPY src ./src
+COPY vasya-core ./vasya-core
+COPY vasya-server ./vasya-server
+# touch: COPY preserves mtimes from the build context, which may be older than
+# the skeleton build above — without it cargo would reuse the dummy binary.
+RUN touch src/main.rs src/lib.rs vasya-core/src/lib.rs \
+        vasya-server/src/main.rs vasya-server/src/lib.rs \
+    && cargo build --release --locked --offline -p vasya-server
+
+FROM debian:bookworm-slim AS runtime
+# curl is used by the container healthcheck and for debugging from inside.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+RUN useradd --system --uid 10001 --shell /usr/sbin/nologin vasya \
+    && mkdir -p /data && chown vasya:vasya /data
+COPY --from=builder /ws/target/release/vasya-server /usr/local/bin/vasya-server
+
+USER vasya
+# Encrypted Telegram sessions, accounts.json, agent-keys.json, audit.log,
+# media cache — mount a named volume here.
+ENV VASYA_DATA_DIR=/data
+VOLUME /data
+# Default binds to loopback; in a container Caddy connects over the compose
+# network, so listen on all container interfaces (the host port mapping in
+# compose still pins exposure to 127.0.0.1).
+ENV VASYA_BIND=0.0.0.0:8787
+EXPOSE 8787
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD curl -fsS http://127.0.0.1:8787/api/v1/health || exit 1
+CMD ["vasya-server"]

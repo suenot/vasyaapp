@@ -55,6 +55,41 @@ pub async fn get_storage_mode(
     Ok(StorageMode::Local)
 }
 
+/// Marker file checked at startup: when present, the embedded engine stays
+/// cold (no sessions loaded, no update pumps) and the UI talks to an
+/// external vasya-server over HTTP instead.
+pub const REMOTE_MODE_MARKER: &str = "remote-mode";
+
+/// Persist the remote-server mode flag. Takes effect on the NEXT app start
+/// (the frontend restarts the app right after flipping it).
+#[tauri::command]
+pub async fn set_remote_mode(enabled: bool, app: AppHandle) -> Result<(), String> {
+    let app_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+    let marker = app_dir.join(REMOTE_MODE_MARKER);
+
+    let result = if enabled {
+        std::fs::write(&marker, b"1")
+    } else {
+        match std::fs::remove_file(&marker) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            other => other,
+        }
+    };
+    result.map_err(|e| format!("Failed to update remote-mode marker: {}", e))?;
+
+    tracing::info!(enabled, "Remote-server mode flag updated (applies on restart)");
+    Ok(())
+}
+
+/// Relaunch the app (used after switching the engine mode).
+#[tauri::command]
+pub fn restart_app(app: AppHandle) {
+    app.restart();
+}
+
 /// Switch storage mode
 #[tauri::command]
 pub async fn set_storage_mode(

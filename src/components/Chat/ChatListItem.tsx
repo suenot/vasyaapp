@@ -1,5 +1,5 @@
 import { memo, useCallback } from 'react';
-import { convertFileSrc } from '@tauri-apps/api/core';
+import { convertFileSrc } from '../../transport';
 import { Chat } from '../../types/telegram';
 import { useTranslation } from '../../i18n';
 

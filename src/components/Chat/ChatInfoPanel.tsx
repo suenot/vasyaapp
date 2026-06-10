@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { convertFileSrc } from '@tauri-apps/api/core';
+import { convertFileSrc } from '../../transport';
 import { Chat } from '../../types/telegram';
 import { useTranslation, TranslationKey } from '../../i18n';
 import { AvatarViewer } from './AvatarViewer';

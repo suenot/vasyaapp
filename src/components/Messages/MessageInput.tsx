@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect, KeyboardEvent, ClipboardEvent, DragEvent } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke, sendMedia } from '../../transport';
 import { readImage } from '@tauri-apps/plugin-clipboard-manager';
 import { useMessagesStore } from '../../store/messagesStore';
 import { Message } from '../../types/telegram';
@@ -165,7 +165,7 @@ export const MessageInput = ({ accountId, chatId, topicId, onMessageSent }: Mess
     };
     if (captionText) headers['x-caption'] = encodeURIComponent(captionText);
 
-    return invoke<Message>('send_media', new Uint8Array(buffer), { headers });
+    return sendMedia<Message>(new Uint8Array(buffer), headers);
   }, [accountId, chatId]);
 
   const handleSend = useCallback(async () => {

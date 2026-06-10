@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../../transport';
 import { AccountSettings } from '../Settings/AccountSettings';
 import { MyQrCode } from '../Profile/MyQrCode';
 import { AccountSwitcher } from '../Accounts/AccountSwitcher';

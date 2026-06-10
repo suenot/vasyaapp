@@ -4,7 +4,9 @@
 //! SQLite file — anything that can read the app's data dir can hijack the
 //! Telegram account. This module replaces it with an in-memory `Session`
 //! implementation that persists an encrypted snapshot
-//! (ChaCha20-Poly1305, key in the OS keychain) to `<account>.session.enc`.
+//! (ChaCha20-Poly1305) to `<account>.session.enc`. The master key comes
+//! from a pluggable [`super::master_key::MasterKeyProvider`] (OS keychain
+//! on desktop, env-injected on servers).
 //!
 //! Design notes:
 //! * The `Session` trait is synchronous and called on hot paths
@@ -390,91 +392,6 @@ impl Session for EncryptedSession {
     }
 }
 
-// --- Key management ----------------------------------------------------------
-
-const KEYRING_SERVICE: &str = "com.suenot.vasyapp";
-const KEYRING_USER: &str = "session-encryption-key";
-const KEY_FILE_NAME: &str = ".session.key";
-
-fn encode_key(key: &[u8; 32]) -> String {
-    key.iter().map(|b| format!("{b:02x}")).collect()
-}
-
-fn decode_key(hex: &str) -> Option<[u8; 32]> {
-    let hex = hex.trim();
-    if hex.len() != 64 {
-        return None;
-    }
-    let mut key = [0u8; 32];
-    for (i, chunk) in hex.as_bytes().chunks(2).enumerate() {
-        key[i] = u8::from_str_radix(std::str::from_utf8(chunk).ok()?, 16).ok()?;
-    }
-    Some(key)
-}
-
-fn generate_key() -> [u8; 32] {
-    let mut key = [0u8; 32];
-    rand::rngs::OsRng.fill_bytes(&mut key);
-    key
-}
-
-fn keyring_get() -> Option<[u8; 32]> {
-    let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER).ok()?;
-    decode_key(&entry.get_password().ok()?)
-}
-
-fn keyring_set(key: &[u8; 32]) -> bool {
-    match keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER) {
-        Ok(entry) => entry.set_password(&encode_key(key)).is_ok(),
-        Err(_) => false,
-    }
-}
-
-fn key_file_path(sessions_dir: &Path) -> PathBuf {
-    sessions_dir.join(KEY_FILE_NAME)
-}
-
-fn key_file_get(sessions_dir: &Path) -> Option<[u8; 32]> {
-    decode_key(&std::fs::read_to_string(key_file_path(sessions_dir)).ok()?)
-}
-
-fn key_file_set(sessions_dir: &Path, key: &[u8; 32]) -> Result<()> {
-    let path = key_file_path(sessions_dir);
-    std::fs::write(&path, encode_key(key)).context("Failed to write session key file")?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
-    }
-    Ok(())
-}
-
-/// Returns the session master key, creating it on first use.
-///
-/// Resolution ladder (stable across runs):
-/// 1. OS keychain (macOS/iOS Keychain, Windows Credential Manager, …)
-/// 2. Key file in the sessions dir (fallback for platforms/setups without a
-///    usable keychain — still better than plaintext sessions, and the 0600
-///    file at least keeps other users out)
-/// 3. Generate fresh: prefer storing in the keychain, else the key file.
-pub fn get_or_create_master_key(sessions_dir: &Path) -> Result<[u8; 32]> {
-    if let Some(key) = keyring_get() {
-        return Ok(key);
-    }
-    if let Some(key) = key_file_get(sessions_dir) {
-        return Ok(key);
-    }
-
-    let key = generate_key();
-    if keyring_set(&key) {
-        tracing::info!("Session encryption key created in the OS keychain");
-    } else {
-        key_file_set(sessions_dir, &key)?;
-        tracing::warn!("OS keychain unavailable — session key stored in a 0600 key file");
-    }
-    Ok(key)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -521,11 +438,5 @@ mod tests {
         assert!(EncryptedSession::load(&path, &[9u8; 32]).is_err());
 
         std::fs::remove_dir_all(&dir).ok();
-    }
-
-    #[test]
-    fn key_codec_roundtrip() {
-        let key = generate_key();
-        assert_eq!(decode_key(&encode_key(&key)), Some(key));
     }
 }

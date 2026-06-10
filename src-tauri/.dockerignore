@@ -1,0 +1,14 @@
+# Keep the Dockerfile.server build context lean: only the workspace
+# manifests and Rust sources matter for the vasya-server image.
+target/
+gen/
+icons/
+media/
+logs/
+capabilities/
+stt-sidecar/
+voip-sidecar/
+vasya-mcp/node_modules/
+vasya-mcp/dist/
+*.log
+.DS_Store

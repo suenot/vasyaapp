@@ -11,12 +11,12 @@ use grammers_session::SessionData;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock as StdRwLock};
-use tauri::AppHandle;
 use tokio::sync::{mpsc, RwLock};
 use tokio::task::JoinHandle;
 
 use super::auth::UserInfo;
-use super::encrypted_session::{get_or_create_master_key, EncryptedSession};
+use super::encrypted_session::EncryptedSession;
+use super::master_key::{KeychainKeyProvider, MasterKeyProvider};
 use super::updates;
 
 /// Telegram client wrapper with metadata
@@ -48,10 +48,27 @@ pub struct TelegramClientManager {
     pub sessions_dir: PathBuf,
     /// API credentials behind a std RwLock for in-place updates without replacing the manager
     credentials: StdRwLock<(i32, String)>,
+    /// Where the session encryption master key comes from (keychain on
+    /// desktop, env/file on servers).
+    key_provider: Arc<dyn MasterKeyProvider>,
 }
 
 impl TelegramClientManager {
+    /// Desktop constructor: master key in the OS keychain with a key-file
+    /// fallback (unchanged historical behavior).
     pub fn new(sessions_dir: PathBuf, api_id: i32, api_hash: String) -> Self {
+        let key_provider = Arc::new(KeychainKeyProvider::desktop_default(sessions_dir.clone()));
+        Self::with_key_provider(sessions_dir, api_id, api_hash, key_provider)
+    }
+
+    /// Server constructor: bring your own key provider
+    /// (e.g. `EnvKeyProvider::default_var()` reading `SESSION_MASTER_KEY`).
+    pub fn with_key_provider(
+        sessions_dir: PathBuf,
+        api_id: i32,
+        api_hash: String,
+        key_provider: Arc<dyn MasterKeyProvider>,
+    ) -> Self {
         Self {
             clients: Arc::new(RwLock::new(HashMap::new())),
             tasks: Arc::new(RwLock::new(HashMap::new())),
@@ -59,6 +76,7 @@ impl TelegramClientManager {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             sessions_dir,
             credentials: StdRwLock::new((api_id, api_hash)),
+            key_provider,
         }
     }
 
@@ -66,7 +84,9 @@ impl TelegramClientManager {
     /// legacy plaintext SQLite session if one is found. The plaintext file is
     /// deleted only after the encrypted snapshot is safely on disk.
     fn open_session(&self, account_id: &str) -> Result<Arc<EncryptedSession>> {
-        let key = get_or_create_master_key(&self.sessions_dir)
+        let key = self
+            .key_provider
+            .get_or_create()
             .context("Failed to obtain session encryption key")?;
         let enc_path = self.sessions_dir.join(format!("{}.session.enc", account_id));
         let legacy_path = self.sessions_dir.join(format!("{}.session", account_id));
@@ -159,7 +179,11 @@ impl TelegramClientManager {
 
     /// Start the real-time updates handler for an account.
     /// Should be called after successful authentication.
-    pub async fn start_updates(&self, account_id: &str, app: AppHandle) -> Result<()> {
+    pub async fn start_updates(
+        &self,
+        account_id: &str,
+        ctx: updates::UpdatesContext,
+    ) -> Result<()> {
         let wrapper = self
             .get_client(account_id)
             .await
@@ -186,7 +210,8 @@ impl TelegramClientManager {
         let handle = updates::spawn_updates_handler(
             update_stream,
             account_id.to_string(),
-            app,
+            wrapper.clone(),
+            ctx,
             shutdown_rx,
         );
 

@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, memo } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../../transport';
 import { ForumTopic } from '../../types/telegram';
 import { useTranslation } from '../../i18n';
 import './TopicList.css';

@@ -1,5 +1,7 @@
 import { useEffect, useCallback, useMemo, useRef } from 'react';
 import { LoginForm } from './components/Auth/LoginForm';
+import { ServerConnect } from './components/Auth/ServerConnect';
+import { getTransportMode, isServerConfigured } from './transport';
 import { MainLayout } from './components/Layout/MainLayout';
 import { ApiSettings } from './components/Settings/ApiSettings';
 import { CallOverlay } from './components/Call';
@@ -55,6 +57,12 @@ function App() {
   useEffect(() => {
     loadSttSettings();
   }, [loadSttSettings]);
+
+  // Re-arm the local API server if its toggle was left on (desktop only;
+  // a no-op when disabled or when the backend lacks the command).
+  useEffect(() => {
+    useSettingsStore.getState().syncLocalApi();
+  }, []);
 
   // Setup call event listeners
   useEffect(() => {
@@ -140,6 +148,15 @@ function App() {
       setActiveAccount(fallbackId);
     }
   }, [accounts, setActiveAccount]);
+
+  // Web build talking to a remote server: connection gate comes first.
+  if (getTransportMode() === 'remote' && !isServerConfigured()) {
+    return (
+      <div className="app">
+        <ServerConnect />
+      </div>
+    );
+  }
 
   // Если API не настроен - показываем экран настройки
   if (!isConfigured) {

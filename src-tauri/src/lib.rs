@@ -1,9 +1,14 @@
 //! Telegram client application
 
-mod telegram;
 mod database;
+mod events;
 mod storage;
-mod commands;
+// pub: integration tests drive commands::local_api::spawn_local_api.
+pub mod commands;
+
+// The Telegram engine lives in the Tauri-free `vasya-core` crate; re-export
+// it so existing `crate::telegram::...` paths keep working.
+pub use vasya_core::telegram;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -24,6 +29,11 @@ pub struct AppState {
     pub active_group_calls: Arc<RwLock<telegram::group_call_state::ActiveGroupCalls>>,
     /// VoIP sidecar process handle
     pub voip_sidecar: Option<commands::voip_sidecar::VoipSidecarHandle>,
+    /// Forwards engine events to the embedded local API server while it runs.
+    pub server_events: Arc<events::ServerEventForwarder>,
+    /// Running embedded local API server (Settings toggle, desktop only).
+    #[cfg(desktop)]
+    pub local_api: Option<commands::local_api::LocalApiHandle>,
     #[allow(dead_code)]
     _logger_guard: Option<tracing_appender::non_blocking::WorkerGuard>,
 }
@@ -38,6 +48,9 @@ impl Default for AppState {
             active_calls: Arc::new(RwLock::new(telegram::call_state::ActiveCalls::default())),
             active_group_calls: Arc::new(RwLock::new(telegram::group_call_state::ActiveGroupCalls::default())),
             voip_sidecar: None,
+            server_events: Arc::new(events::ServerEventForwarder::default()),
+            #[cfg(desktop)]
+            local_api: None,
             _logger_guard: None,
         }
     }
@@ -104,6 +117,11 @@ pub fn run() {
             commands::leave_group_call,
             commands::toggle_group_call_mute,
             commands::get_group_call_participants,
+            commands::start_local_api,
+            commands::stop_local_api,
+            commands::local_api_status,
+            commands::set_remote_mode,
+            commands::restart_app,
         ])
         .setup(|app| {
             let app_dir = app
@@ -164,17 +182,32 @@ pub fn run() {
             let state = app.state::<Arc<RwLock<AppState>>>();
             let app_handle = app.handle().clone();
 
+            // Remote-server mode: leave the embedded engine cold — no local
+            // sessions, no update pumps; the UI talks to an external
+            // vasya-server over HttpTransport instead.
+            let remote_mode = app_dir.join(commands::settings::REMOTE_MODE_MARKER).exists();
+            if remote_mode {
+                tracing::info!("Remote-server mode: embedded engine not started");
+            }
+
             tauri::async_runtime::block_on(async {
-                if let Err(e) = client_manager.load_existing_sessions().await {
-                    tracing::warn!(error = %e, "Failed to load sessions");
+                if !remote_mode {
+                    if let Err(e) = client_manager.load_existing_sessions().await {
+                        tracing::warn!(error = %e, "Failed to load sessions");
+                    }
                 }
 
                 // Start updates handlers for loaded sessions
                 let loaded_clients = client_manager.list_clients().await;
                 let cm_arc = Arc::new(client_manager);
 
+                let updates_ctx = {
+                    let state_guard = state.read().await;
+                    events::updates_context(&app_handle, &state_guard)
+                };
+
                 for account_id in &loaded_clients {
-                    if let Err(e) = cm_arc.start_updates(account_id, app_handle.clone()).await {
+                    if let Err(e) = cm_arc.start_updates(account_id, updates_ctx.clone()).await {
                         tracing::warn!(
                             account_id = %account_id,
                             error = %e,

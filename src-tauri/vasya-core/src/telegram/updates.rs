@@ -1,7 +1,8 @@
 //! Telegram updates handler
 //!
 //! Processes real-time updates from Telegram (new messages, edits, deletions, etc.)
-//! and emits them as Tauri events to the frontend.
+//! and emits them through the [`EventSink`] abstraction. Event names and payload
+//! shapes are the frontend contract — do not change them.
 
 use std::sync::Arc;
 use grammers_client::client::updates::UpdateStream;
@@ -9,12 +10,36 @@ use grammers_client::types::{Message as GrammersMessage, Media, Update};
 use grammers_session::defs::PeerId;
 use grammers_tl_types as tl;
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::{broadcast, RwLock};
 
-use crate::AppState;
-use crate::commands::media_types::classify_media_type;
-use crate::telegram::call_state::*;
+use crate::events::EventSink;
+use crate::media::classify_media_type;
+use super::call_state::*;
+use super::client_manager::TelegramClientWrapper;
+use super::group_call_state::ActiveGroupCalls;
+
+/// Everything the update pump needs besides the stream itself: where events
+/// go and the shared call registries. The Tauri app builds this with an
+/// AppHandle-backed sink; the server with a broadcast sink.
+#[derive(Clone)]
+pub struct UpdatesContext {
+    pub sink: Arc<dyn EventSink>,
+    pub active_calls: Arc<RwLock<ActiveCalls>>,
+    pub active_group_calls: Arc<RwLock<ActiveGroupCalls>>,
+}
+
+impl UpdatesContext {
+    /// Serialize and emit, logging (not propagating) serialization failures —
+    /// mirrors the old `let _ = app.emit(...)` semantics.
+    fn emit<T: Serialize>(&self, event: &str, payload: &T) {
+        match serde_json::to_value(payload) {
+            Ok(value) => self.sink.emit(event, value),
+            Err(e) => {
+                tracing::error!(error = %e, event, "Failed to serialize event payload")
+            }
+        }
+    }
+}
 
 /// Media info included in real-time events (no file_path — not downloaded yet)
 #[derive(Debug, Clone, Serialize)]
@@ -124,13 +149,15 @@ pub fn shutdown_channel() -> (ShutdownTx, ShutdownRx) {
 
 /// Spawn an updates handler task for an account.
 ///
-/// Accepts an `UpdateStream` created from `client.stream_updates(receiver, config)`.
-/// Listens for Telegram updates and emits Tauri events.
+/// Accepts an `UpdateStream` created from `client.stream_updates(receiver, config)`
+/// plus the account's client wrapper (used to acknowledge incoming calls).
+/// Listens for Telegram updates and emits them through the context's sink.
 /// Returns a JoinHandle that can be used to track/cancel the task.
 pub fn spawn_updates_handler(
     mut update_stream: UpdateStream,
     account_id: String,
-    app: AppHandle,
+    wrapper: Arc<TelegramClientWrapper>,
+    ctx: UpdatesContext,
     mut shutdown_rx: ShutdownRx,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
@@ -140,9 +167,9 @@ pub fn spawn_updates_handler(
         );
 
         // Emit connected status
-        let _ = app.emit(
+        ctx.emit(
             "connection-status",
-            ConnectionStatusEvent {
+            &ConnectionStatusEvent {
                 account_id: account_id.clone(),
                 status: "connected".to_string(),
             },
@@ -162,7 +189,7 @@ pub fn spawn_updates_handler(
                 update = update_stream.next() => {
                     match update {
                         Ok(update) => {
-                            handle_update(&update, &account_id, &app);
+                            handle_update(&update, &account_id, &ctx, &wrapper);
                         }
                         Err(e) => {
                             tracing::error!(
@@ -172,9 +199,9 @@ pub fn spawn_updates_handler(
                             );
 
                             // Emit reconnecting status
-                            let _ = app.emit(
+                            ctx.emit(
                                 "connection-status",
-                                ConnectionStatusEvent {
+                                &ConnectionStatusEvent {
                                     account_id: account_id.clone(),
                                     status: "reconnecting".to_string(),
                                 },
@@ -189,9 +216,9 @@ pub fn spawn_updates_handler(
         }
 
         // Emit disconnected status
-        let _ = app.emit(
+        ctx.emit(
             "connection-status",
-            ConnectionStatusEvent {
+            &ConnectionStatusEvent {
                 account_id: account_id.clone(),
                 status: "disconnected".to_string(),
             },
@@ -200,7 +227,12 @@ pub fn spawn_updates_handler(
 }
 
 /// Process a single Telegram update
-fn handle_update(update: &Update, account_id: &str, app: &AppHandle) {
+fn handle_update(
+    update: &Update,
+    account_id: &str,
+    ctx: &UpdatesContext,
+    wrapper: &Arc<TelegramClientWrapper>,
+) {
     match update {
         Update::NewMessage(msg) if !msg.outgoing() => {
             tracing::debug!(
@@ -210,16 +242,12 @@ fn handle_update(update: &Update, account_id: &str, app: &AppHandle) {
             );
 
             let event = message_to_event(msg, account_id);
-            if let Err(e) = app.emit("telegram:new-message", &event) {
-                tracing::error!(error = %e, "Failed to emit new-message event");
-            }
+            ctx.emit("telegram:new-message", &event);
         }
         Update::NewMessage(msg) if msg.outgoing() => {
             // Outgoing messages (sent from other devices)
             let event = message_to_event(msg, account_id);
-            if let Err(e) = app.emit("telegram:new-message", &event) {
-                tracing::error!(error = %e, "Failed to emit outgoing-message event");
-            }
+            ctx.emit("telegram:new-message", &event);
         }
         Update::MessageEdited(msg) => {
             let chat_id = msg.peer_id().bot_api_dialog_id();
@@ -235,9 +263,7 @@ fn handle_update(update: &Update, account_id: &str, app: &AppHandle) {
                 account_id: account_id.to_string(),
             };
 
-            if let Err(e) = app.emit("telegram:message-edited", &event) {
-                tracing::error!(error = %e, "Failed to emit message-edited event");
-            }
+            ctx.emit("telegram:message-edited", &event);
         }
         Update::MessageDeleted(deleted) => {
             // channel_id() returns Option<i64> (bare id), convert to bot_api format
@@ -252,16 +278,14 @@ fn handle_update(update: &Update, account_id: &str, app: &AppHandle) {
                 account_id: account_id.to_string(),
             };
 
-            if let Err(e) = app.emit("telegram:message-deleted", &event) {
-                tracing::error!(error = %e, "Failed to emit message-deleted event");
-            }
+            ctx.emit("telegram:message-deleted", &event);
         }
         Update::Raw(raw) => {
             tracing::debug!("Raw update received: {:?}", std::mem::discriminant(&raw.raw));
             match &raw.raw {
                 tl::enums::Update::PhoneCall(update) => {
                     tracing::info!("PhoneCall update received: {:?}", std::mem::discriminant(&update.phone_call));
-                    handle_phone_call_update(&update.phone_call, account_id, app);
+                    handle_phone_call_update(&update.phone_call, account_id, ctx, wrapper);
                 }
                 tl::enums::Update::PhoneCallSignalingData(update) => {
                     let event = serde_json::json!({
@@ -269,13 +293,13 @@ fn handle_update(update: &Update, account_id: &str, app: &AppHandle) {
                         "data": update.data,
                         "accountId": account_id,
                     });
-                    let _ = app.emit("telegram:call-signaling-data", &event);
+                    ctx.sink.emit("telegram:call-signaling-data", event);
                 }
                 tl::enums::Update::GroupCall(update) => {
-                    handle_group_call_update(update, account_id, app);
+                    handle_group_call_update(update, account_id, ctx);
                 }
                 tl::enums::Update::GroupCallParticipants(update) => {
-                    handle_group_call_participants_update(update, account_id, app);
+                    handle_group_call_participants_update(update, account_id, ctx);
                 }
                 tl::enums::Update::GroupCallConnection(update) => {
                     let params_data = match &update.params {
@@ -286,9 +310,7 @@ fn handle_update(update: &Update, account_id: &str, app: &AppHandle) {
                         "params": params_data,
                         "accountId": account_id,
                     });
-                    if let Err(e) = app.emit("telegram:group-call-connection", &event) {
-                        tracing::error!(error = %e, "Failed to emit group-call-connection event");
-                    }
+                    ctx.sink.emit("telegram:group-call-connection", event);
                 }
                 _ => {
                     // Other raw update types (user status, typing, etc.)
@@ -305,7 +327,8 @@ fn handle_update(update: &Update, account_id: &str, app: &AppHandle) {
 fn handle_phone_call_update(
     phone_call: &tl::enums::PhoneCall,
     account_id: &str,
-    app: &AppHandle,
+    ctx: &UpdatesContext,
+    wrapper: &Arc<TelegramClientWrapper>,
 ) {
     match phone_call {
         tl::enums::PhoneCall::Requested(req) => {
@@ -316,17 +339,15 @@ fn handle_phone_call_update(
             );
 
             // Store in active_calls and send phone.receivedCall acknowledgement
-            let app_state = app.state::<Arc<RwLock<AppState>>>();
             let call_id = req.id;
             let access_hash = req.access_hash;
             let admin_id = req.admin_id;
             let is_video = req.video;
             let account_id_owned = account_id.to_string();
 
-            let state_clone = app_state.inner().clone();
+            let active_calls = ctx.active_calls.clone();
+            let wrapper = wrapper.clone();
             tokio::spawn(async move {
-                let state_guard = state_clone.read().await;
-
                 // Store call info
                 let call_info = CallInfo {
                     call_id,
@@ -338,25 +359,20 @@ fn handle_phone_call_update(
                     dh_exchange: None,
                     shared_key: None,
                     key_fingerprint: None,
-                    account_id: account_id_owned.clone(),
+                    account_id: account_id_owned,
                 };
-                let active_calls = state_guard.active_calls.clone();
                 {
                     let mut calls = active_calls.write().await;
                     calls.calls.insert(call_id, call_info);
                 }
 
                 // Acknowledge receipt of call (required by Telegram protocol)
-                if let Some(cm) = state_guard.client_manager.as_ref() {
-                    if let Some(wrapper) = cm.get_client(&account_id_owned).await {
-                        let peer = tl::enums::InputPhoneCall::Call(tl::types::InputPhoneCall {
-                            id: call_id,
-                            access_hash,
-                        });
-                        if let Err(e) = wrapper.client.invoke(&tl::functions::phone::ReceivedCall { peer }).await {
-                            tracing::warn!(error = %e, "Failed to send phone.receivedCall");
-                        }
-                    }
+                let peer = tl::enums::InputPhoneCall::Call(tl::types::InputPhoneCall {
+                    id: call_id,
+                    access_hash,
+                });
+                if let Err(e) = wrapper.client.invoke(&tl::functions::phone::ReceivedCall { peer }).await {
+                    tracing::warn!(error = %e, "Failed to send phone.receivedCall");
                 }
             });
 
@@ -367,9 +383,7 @@ fn handle_phone_call_update(
                 "isVideo": req.video,
                 "accountId": account_id,
             });
-            if let Err(e) = app.emit("telegram:incoming-call", &event) {
-                tracing::error!(error = %e, "Failed to emit incoming-call event");
-            }
+            ctx.sink.emit("telegram:incoming-call", event);
         }
         tl::enums::PhoneCall::Waiting(w) => {
             let event = serde_json::json!({
@@ -377,9 +391,7 @@ fn handle_phone_call_update(
                 "state": "waiting",
                 "accountId": account_id,
             });
-            if let Err(e) = app.emit("telegram:call-state-changed", &event) {
-                tracing::error!(error = %e, "Failed to emit call-state-changed event");
-            }
+            ctx.sink.emit("telegram:call-state-changed", event);
         }
         tl::enums::PhoneCall::Accepted(a) => {
             // The callee accepted; include g_b so frontend can trigger confirm_call
@@ -389,9 +401,7 @@ fn handle_phone_call_update(
                 "gB": a.g_b,
                 "accountId": account_id,
             });
-            if let Err(e) = app.emit("telegram:call-state-changed", &event) {
-                tracing::error!(error = %e, "Failed to emit call-state-changed event");
-            }
+            ctx.sink.emit("telegram:call-state-changed", event);
         }
         tl::enums::PhoneCall::Call(c) => {
             // Call is now active (after confirmCall on both sides)
@@ -400,9 +410,7 @@ fn handle_phone_call_update(
                 "state": "active",
                 "accountId": account_id,
             });
-            if let Err(e) = app.emit("telegram:call-state-changed", &event) {
-                tracing::error!(error = %e, "Failed to emit call-state-changed event");
-            }
+            ctx.sink.emit("telegram:call-state-changed", event);
         }
         tl::enums::PhoneCall::Discarded(d) => {
             let reason = d.reason.as_ref().map(|r| match r {
@@ -414,13 +422,10 @@ fn handle_phone_call_update(
             }).unwrap_or("unknown");
 
             // Remove from active_calls
-            let app_state = app.state::<Arc<RwLock<AppState>>>();
             let call_id = d.id;
-            let state_clone = app_state.inner().clone();
+            let active_calls = ctx.active_calls.clone();
             tokio::spawn(async move {
-                let state_guard = state_clone.read().await;
-                let mut calls = state_guard.active_calls.write().await;
-                calls.calls.remove(&call_id);
+                active_calls.write().await.calls.remove(&call_id);
             });
 
             let event = serde_json::json!({
@@ -429,9 +434,7 @@ fn handle_phone_call_update(
                 "reason": reason,
                 "accountId": account_id,
             });
-            if let Err(e) = app.emit("telegram:call-state-changed", &event) {
-                tracing::error!(error = %e, "Failed to emit call-state-changed event");
-            }
+            ctx.sink.emit("telegram:call-state-changed", event);
         }
         tl::enums::PhoneCall::Empty(_) => {
             // Ignore empty phone call updates
@@ -443,7 +446,7 @@ fn handle_phone_call_update(
 fn handle_group_call_update(
     update: &tl::types::UpdateGroupCall,
     account_id: &str,
-    app: &AppHandle,
+    ctx: &UpdatesContext,
 ) {
     match &update.call {
         tl::enums::GroupCall::Call(call) => {
@@ -457,19 +460,14 @@ fn handle_group_call_update(
                 "state": "active",
                 "accountId": account_id,
             });
-            if let Err(e) = app.emit("telegram:group-call-update", &event) {
-                tracing::error!(error = %e, "Failed to emit group-call-update event");
-            }
+            ctx.sink.emit("telegram:group-call-update", event);
         }
         tl::enums::GroupCall::Discarded(d) => {
             // Remove from active group calls
-            let app_state = app.state::<Arc<RwLock<AppState>>>();
             let call_id = d.id;
-            let state_clone = app_state.inner().clone();
+            let active_group_calls = ctx.active_group_calls.clone();
             tokio::spawn(async move {
-                let state_guard = state_clone.read().await;
-                let mut calls = state_guard.active_group_calls.write().await;
-                calls.calls.remove(&call_id);
+                active_group_calls.write().await.calls.remove(&call_id);
             });
 
             let event = serde_json::json!({
@@ -478,9 +476,7 @@ fn handle_group_call_update(
                 "duration": d.duration,
                 "accountId": account_id,
             });
-            if let Err(e) = app.emit("telegram:group-call-update", &event) {
-                tracing::error!(error = %e, "Failed to emit group-call-update event");
-            }
+            ctx.sink.emit("telegram:group-call-update", event);
         }
     }
 }
@@ -489,7 +485,7 @@ fn handle_group_call_update(
 fn handle_group_call_participants_update(
     update: &tl::types::UpdateGroupCallParticipants,
     account_id: &str,
-    app: &AppHandle,
+    ctx: &UpdatesContext,
 ) {
     let call_input = match &update.call {
         tl::enums::InputGroupCall::Call(c) => Some((c.id, c.access_hash)),
@@ -530,7 +526,5 @@ fn handle_group_call_participants_update(
         "accountId": account_id,
     });
 
-    if let Err(e) = app.emit("telegram:group-call-participants", &event) {
-        tracing::error!(error = %e, "Failed to emit group-call-participants event");
-    }
+    ctx.sink.emit("telegram:group-call-participants", event);
 }

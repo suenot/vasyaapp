@@ -1,0 +1,36 @@
+[package]
+name = "vasya-core"
+version = "0.1.0"
+description = "Tauri-free Telegram (grammers) engine shared by the desktop app and the server"
+edition = "2021"
+
+[dependencies]
+# Telegram MTProto engine
+grammers-client = "0.8"
+grammers-session = "0.8"
+grammers-mtsender = "0.8"
+grammers-tl-types = "0.8"
+
+# Async runtime (spawn, sync primitives, select!, timers)
+tokio = { version = "1.40", features = ["rt", "sync", "time", "macros"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Error handling
+anyhow = "1.0"
+
+# Encrypted session storage + master-key providers
+chacha20poly1305 = "0.10"
+keyring = { version = "3", features = ["apple-native", "windows-native"] }
+rand = "0.8"
+
+# DH key exchange for Telegram voice calls
+num-bigint = "0.4"
+num-traits = "0.2"
+sha1 = "0.10"
+sha2 = "0.10"
+
+# Logging
+tracing = "0.1"

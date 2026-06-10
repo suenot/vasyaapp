@@ -118,7 +118,8 @@ pub async fn verify_code(
                 .map_err(|e| format!("Failed to get user info: {}", e))?;
 
             // Start real-time updates handler
-            if let Err(e) = client_manager.start_updates(&account_id, app).await {
+            let updates_ctx = crate::events::updates_context(&app, &state_guard);
+            if let Err(e) = client_manager.start_updates(&account_id, updates_ctx).await {
                 tracing::error!(error = %e, "Failed to start updates handler");
             }
 
@@ -190,7 +191,8 @@ pub async fn check_password(
         .map_err(|e| format!("Failed to get user info: {}", e))?;
 
     // Start real-time updates handler
-    if let Err(e) = client_manager.start_updates(&account_id, app).await {
+    let updates_ctx = crate::events::updates_context(&app, &state_guard);
+    if let Err(e) = client_manager.start_updates(&account_id, updates_ctx).await {
         tracing::error!(error = %e, "Failed to start updates handler");
     }
 

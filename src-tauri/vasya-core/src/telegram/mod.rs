@@ -3,6 +3,7 @@
 pub mod auth;
 pub mod client_manager;
 pub mod encrypted_session;
+pub mod master_key;
 pub mod updates;
 pub mod dh;
 pub mod call_state;

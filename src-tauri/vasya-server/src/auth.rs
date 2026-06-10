@@ -1,0 +1,199 @@
+//! Authentication: two modes behind one middleware.
+//!
+//! * `EmbeddedLocal` — the desktop app mounts the router in-process on
+//!   127.0.0.1 with a single auto-generated bearer token; one implicit
+//!   user owns everything. No Postgres, no JWT.
+//! * `Jwt` — standalone server: HS256 user JWTs with the same `Claims`
+//!   shape the existing sync backend issues (`sub` = user id), so tokens
+//!   from `backend/`'s login endpoint work as-is when both share
+//!   `JWT_SECRET`. Issuing tokens (email/password login) stays in the
+//!   sync backend; this server only validates.
+//!
+//! Agent API keys (scoped, Postgres-backed) are task #7 and will slot in
+//! as a third arm of `AuthMode`.
+
+use axum::extract::{Request, State};
+use axum::middleware::Next;
+use axum::response::Response;
+use jsonwebtoken::{decode, DecodingKey, Validation};
+use serde::{Deserialize, Serialize};
+
+use crate::context::ServerContext;
+use crate::error::ApiError;
+
+/// JWT claims — must match the sync backend's token shape.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Claims {
+    pub sub: String, // user_id as string
+    pub exp: usize,
+    pub iat: usize,
+}
+
+/// The user id under which all accounts are owned in embedded-local mode.
+pub const LOCAL_USER_ID: &str = "local";
+
+#[derive(Clone)]
+pub enum AuthMode {
+    /// Single-user in-process mode: one shared bearer token.
+    EmbeddedLocal { token: String },
+    /// Multi-user standalone mode: validate HS256 user JWTs.
+    Jwt { secret: String },
+}
+
+impl AuthMode {
+    /// Generate an embedded-local mode with a random 32-byte hex token.
+    pub fn embedded_with_random_token() -> Self {
+        use rand::RngCore;
+        let mut bytes = [0u8; 32];
+        rand::rngs::OsRng.fill_bytes(&mut bytes);
+        let token: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+        Self::EmbeddedLocal { token }
+    }
+
+    /// The bearer token in embedded mode (so the host app can show it to
+    /// local agents); None in JWT mode.
+    pub fn embedded_token(&self) -> Option<&str> {
+        match self {
+            Self::EmbeddedLocal { token } => Some(token),
+            Self::Jwt { .. } => None,
+        }
+    }
+
+    /// Resolve a bearer token to a user id.
+    pub fn authenticate(&self, bearer: &str) -> Result<UserId, ApiError> {
+        match self {
+            Self::EmbeddedLocal { token } => {
+                if constant_time_eq(bearer.as_bytes(), token.as_bytes()) {
+                    Ok(UserId(LOCAL_USER_ID.to_string()))
+                } else {
+                    Err(ApiError::Unauthorized)
+                }
+            }
+            Self::Jwt { secret } => {
+                let data = decode::<Claims>(
+                    bearer,
+                    &DecodingKey::from_secret(secret.as_bytes()),
+                    &Validation::default(),
+                )
+                .map_err(|_| ApiError::Unauthorized)?;
+                Ok(UserId(data.claims.sub))
+            }
+        }
+    }
+}
+
+/// Authenticated caller identity, inserted into request extensions.
+#[derive(Debug, Clone)]
+pub struct UserId(pub String);
+
+/// Constant-time comparison to prevent timing attacks.
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut result = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) {
+        result |= x ^ y;
+    }
+    result == 0
+}
+
+/// Bearer-auth middleware applied to every /api/v1 route except /health
+/// and /openapi.json. Accepts either a human session token (JWT / local
+/// token, all scopes implicit) or an agent key (`vk_...`, scoped — the
+/// agent acts on behalf of its owning user, policy middleware enforces
+/// scopes and quotas).
+pub async fn require_auth(
+    State(ctx): State<std::sync::Arc<ServerContext>>,
+    mut req: Request,
+    next: Next,
+) -> Result<Response, ApiError> {
+    let bearer = req
+        .headers()
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.strip_prefix("Bearer "))
+        .ok_or(ApiError::Unauthorized)?;
+
+    if bearer.starts_with("vk_") {
+        let (user_id, identity) = ctx
+            .agent_keys
+            .authenticate(bearer)
+            .ok_or(ApiError::Unauthorized)?;
+        req.extensions_mut().insert(UserId(user_id));
+        req.extensions_mut().insert(identity);
+    } else {
+        let user = ctx.auth.authenticate(bearer)?;
+        req.extensions_mut().insert(user);
+    }
+    Ok(next.run(req).await)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn constant_time_eq_basics() {
+        assert!(constant_time_eq(b"hello", b"hello"));
+        assert!(!constant_time_eq(b"hello", b"world"));
+        assert!(!constant_time_eq(b"hello", b"hell"));
+        assert!(constant_time_eq(b"", b""));
+        assert!(!constant_time_eq(b"", b"a"));
+    }
+
+    #[test]
+    fn embedded_mode_authenticates_exact_token_only() {
+        let mode = AuthMode::EmbeddedLocal { token: "secret-token".into() };
+        assert_eq!(mode.authenticate("secret-token").unwrap().0, LOCAL_USER_ID);
+        assert!(mode.authenticate("wrong").is_err());
+        assert!(mode.authenticate("").is_err());
+    }
+
+    #[test]
+    fn random_embedded_token_is_64_hex_chars() {
+        let mode = AuthMode::embedded_with_random_token();
+        let token = mode.embedded_token().unwrap();
+        assert_eq!(token.len(), 64);
+        assert!(token.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn jwt_mode_roundtrip_and_rejection() {
+        let secret = "test-secret";
+        let now = chrono::Utc::now().timestamp() as usize;
+        let claims = Claims {
+            sub: "42f00000-0000-0000-0000-000000000042".into(),
+            iat: now,
+            exp: now + 3600,
+        };
+        let token = jsonwebtoken::encode(
+            &jsonwebtoken::Header::default(),
+            &claims,
+            &jsonwebtoken::EncodingKey::from_secret(secret.as_bytes()),
+        )
+        .unwrap();
+
+        let mode = AuthMode::Jwt { secret: secret.into() };
+        assert_eq!(mode.authenticate(&token).unwrap().0, claims.sub);
+        assert!(mode.authenticate("garbage").is_err());
+
+        let wrong = AuthMode::Jwt { secret: "other".into() };
+        assert!(wrong.authenticate(&token).is_err());
+    }
+
+    #[test]
+    fn jwt_mode_rejects_expired_token() {
+        let secret = "test-secret";
+        let now = chrono::Utc::now().timestamp() as usize;
+        let claims = Claims { sub: "u".into(), iat: now - 7200, exp: now - 3600 };
+        let token = jsonwebtoken::encode(
+            &jsonwebtoken::Header::default(),
+            &claims,
+            &jsonwebtoken::EncodingKey::from_secret(secret.as_bytes()),
+        )
+        .unwrap();
+        let mode = AuthMode::Jwt { secret: secret.into() };
+        assert!(mode.authenticate(&token).is_err());
+    }
+}

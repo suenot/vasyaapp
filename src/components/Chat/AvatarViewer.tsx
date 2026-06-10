@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { invoke } from '@tauri-apps/api/core';
-import { convertFileSrc } from '@tauri-apps/api/core';
+import { invoke, convertFileSrc } from '../../transport';
 import './AvatarViewer.css';
 
 interface AvatarViewerProps {

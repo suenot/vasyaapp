@@ -1,6 +1,5 @@
 import { create } from 'zustand';
-import { invoke } from '@tauri-apps/api/core';
-import { listen, UnlistenFn } from '@tauri-apps/api/event';
+import { invoke, subscribe } from '../transport';
 
 export interface GroupCallParticipant {
   userId: number;
@@ -193,13 +192,12 @@ export const useGroupCallStore = create<GroupCallStore>()((set, get) => ({
   }),
 
   setupListeners: () => {
-    const unlisteners: Promise<UnlistenFn>[] = [];
+    const unlisteners: Promise<() => void>[] = [];
 
     // Group call state update
     unlisteners.push(
-      listen<{ callId: number; accessHash: number; chatId: number; title?: string; state: string; participantsCount: number }>('telegram:group-call-update', (event) => {
+      subscribe<{ callId: number; accessHash: number; chatId: number; title?: string; state: string; participantsCount: number }>('telegram:group-call-update', (payload) => {
         const { activeGroupCall } = get();
-        const payload = event.payload;
 
         if (payload.state === 'ended' || payload.state === 'discarded') {
           set({
@@ -234,14 +232,14 @@ export const useGroupCallStore = create<GroupCallStore>()((set, get) => ({
 
     // Group call participants update
     unlisteners.push(
-      listen<{ callId: number; participants: GroupCallParticipant[]; count: number }>('telegram:group-call-participants', (event) => {
+      subscribe<{ callId: number; participants: GroupCallParticipant[]; count: number }>('telegram:group-call-participants', (payload) => {
         const { activeGroupCall } = get();
-        if (activeGroupCall && activeGroupCall.callId === event.payload.callId) {
+        if (activeGroupCall && activeGroupCall.callId === payload.callId) {
           set({
-            participants: event.payload.participants,
+            participants: payload.participants,
             activeGroupCall: {
               ...activeGroupCall,
-              participantsCount: event.payload.count,
+              participantsCount: payload.count,
             },
           });
         }

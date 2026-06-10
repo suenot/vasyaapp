@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect, forwardRef, useImperativeHandle } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../../transport';
 import { Chat, Message } from '../../types/telegram';
 import { useConnectionStore } from '../../store/connectionStore';
 import { useMuteStore } from '../../store/muteStore';

@@ -20,6 +20,9 @@ import { useTauriEvent } from './useTauriEvent';
 import { useMuteStore } from '../store/muteStore';
 import { useSettingsStore } from '../store/settingsStore';
 
+// Without the Tauri runtime, fall back to the browser Notification API.
+const isNative = '__TAURI_INTERNALS__' in window;
+
 interface NewMessageEvent {
   accountId: string;
   chatId: number;
@@ -46,10 +49,18 @@ export function useNotifications(selectedChatId: number | null) {
   // Request notification permission on mount
   useEffect(() => {
     (async () => {
-      let granted = await isPermissionGranted();
-      if (!granted) {
-        const permission = await requestPermission();
-        granted = permission === 'granted';
+      let granted: boolean;
+      if (isNative) {
+        granted = await isPermissionGranted();
+        if (!granted) {
+          const permission = await requestPermission();
+          granted = permission === 'granted';
+        }
+      } else if ('Notification' in window) {
+        granted = Notification.permission === 'granted'
+          || (await Notification.requestPermission()) === 'granted';
+      } else {
+        granted = false;
       }
       permissionGranted.current = granted;
     })().catch((err) => {
@@ -85,8 +96,9 @@ export function useNotifications(selectedChatId: number | null) {
 
     // Skip if the app window is focused
     try {
-      const appWindow = getCurrentWindow();
-      const focused = await appWindow.isFocused();
+      const focused = isNative
+        ? await getCurrentWindow().isFocused()
+        : document.hasFocus();
       if (focused) return;
     } catch {
       // If we can't determine focus state, still show the notification
@@ -119,7 +131,11 @@ export function useNotifications(selectedChatId: number | null) {
     }
 
     // When notification sound is disabled, send a silent notification
-    sendNotification({ title, body, silent: !notificationSoundRef.current });
+    if (isNative) {
+      sendNotification({ title, body, silent: !notificationSoundRef.current });
+    } else {
+      new Notification(title, { body, silent: !notificationSoundRef.current });
+    }
   }, [isMuted]);
 
   useTauriEvent<NewMessageEvent>('telegram:new-message', handleNewMessage);

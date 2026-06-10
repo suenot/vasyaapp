@@ -1,6 +1,5 @@
 import { create } from 'zustand';
-import { invoke } from '@tauri-apps/api/core';
-import { listen, UnlistenFn } from '@tauri-apps/api/event';
+import { invoke, subscribe } from '../transport';
 import { useSettingsStore } from './settingsStore';
 
 export type CallStateEnum =
@@ -220,7 +219,7 @@ export const useCallStore = create<CallStore>()((set, get) => ({
 
   setupListeners: () => {
     console.log('[CallStore] Setting up call event listeners');
-    const unlisteners: Promise<UnlistenFn>[] = [];
+    const unlisteners: Promise<() => void>[] = [];
 
     // Audio level arrives dozens of times per second; coalesce to one store
     // update per animation frame so the whole call UI doesn't re-render per event.
@@ -229,20 +228,20 @@ export const useCallStore = create<CallStore>()((set, get) => ({
 
     // Incoming call
     unlisteners.push(
-      listen<{ callId: number; accessHash: number; userId: number; userName: string; isVideo: boolean; accountId: string }>('telegram:incoming-call', (event) => {
-        console.log('[CallStore] telegram:incoming-call', event.payload);
+      subscribe<{ callId: number; accessHash: number; userId: number; userName: string; isVideo: boolean; accountId: string }>('telegram:incoming-call', (payload) => {
+        console.log('[CallStore] telegram:incoming-call', payload);
         // Calls are experimental (VoIP encryption is a stub). With the flag off
         // we don't surface the incoming-call UI at all — the call keeps ringing
         // on the user's other Telegram clients.
         if (!useSettingsStore.getState().experimentalCalls) return;
         set({
           incomingCall: {
-            callId: event.payload.callId,
-            accessHash: event.payload.accessHash,
-            userId: event.payload.userId,
-            userName: event.payload.userName || 'Unknown',
-            isVideo: event.payload.isVideo,
-            accountId: event.payload.accountId,
+            callId: payload.callId,
+            accessHash: payload.accessHash,
+            userId: payload.userId,
+            userName: payload.userName || 'Unknown',
+            isVideo: payload.isVideo,
+            accountId: payload.accountId,
           },
         });
       })
@@ -250,8 +249,8 @@ export const useCallStore = create<CallStore>()((set, get) => ({
 
     // Call state changed
     unlisteners.push(
-      listen<{ callId: number; state: string; reason?: string; gB?: number[]; accountId: string }>('telegram:call-state-changed', (event) => {
-        console.log('[CallStore] telegram:call-state-changed', event.payload);
+      subscribe<{ callId: number; state: string; reason?: string; gB?: number[]; accountId: string }>('telegram:call-state-changed', (payload) => {
+        console.log('[CallStore] telegram:call-state-changed', payload);
         const { activeCall } = get();
         const stateMap: Record<string, CallStateEnum> = {
           waiting: 'waiting',
@@ -261,14 +260,14 @@ export const useCallStore = create<CallStore>()((set, get) => ({
           discarded: 'ended',
         };
 
-        const newState = stateMap[event.payload.state] || 'ended';
+        const newState = stateMap[payload.state] || 'ended';
 
         if (newState === 'ended') {
           set({ activeCall: null, incomingCall: null });
           return;
         }
 
-        if (activeCall && activeCall.callId === event.payload.callId) {
+        if (activeCall && activeCall.callId === payload.callId) {
           set({
             activeCall: {
               ...activeCall,
@@ -278,11 +277,11 @@ export const useCallStore = create<CallStore>()((set, get) => ({
           });
 
           // Auto-confirm: when caller receives "accepted" with g_b, complete DH handshake
-          if (newState === 'accepted' && activeCall.isOutgoing && event.payload.gB) {
+          if (newState === 'accepted' && activeCall.isOutgoing && payload.gB) {
             invoke('confirm_call', {
-              accountId: event.payload.accountId,
-              callId: event.payload.callId,
-              gB: event.payload.gB,
+              accountId: payload.accountId,
+              callId: payload.callId,
+              gB: payload.gB,
             }).catch((err) => {
               console.error('Failed to confirm call:', err);
               set({ callError: String(err) });
@@ -294,8 +293,8 @@ export const useCallStore = create<CallStore>()((set, get) => ({
 
     // Audio level from VoIP sidecar (throttled to one update per frame)
     unlisteners.push(
-      listen<{ level: number }>('telegram:call-audio-level', (event) => {
-        pendingAudioLevel = event.payload.level;
+      subscribe<{ level: number }>('telegram:call-audio-level', (payload) => {
+        pendingAudioLevel = payload.level;
         if (!audioLevelRaf) {
           audioLevelRaf = requestAnimationFrame(() => {
             audioLevelRaf = 0;
@@ -307,14 +306,14 @@ export const useCallStore = create<CallStore>()((set, get) => ({
 
     // Network quality from VoIP sidecar
     unlisteners.push(
-      listen<{ quality: number }>('telegram:call-network-quality', (event) => {
-        set({ networkQuality: event.payload.quality });
+      subscribe<{ quality: number }>('telegram:call-network-quality', (payload) => {
+        set({ networkQuality: payload.quality });
       })
     );
 
     // Call connected (sidecar audio flowing)
     unlisteners.push(
-      listen('telegram:call-connected', () => {
+      subscribe('telegram:call-connected', () => {
         const { activeCall } = get();
         if (activeCall) {
           set({
@@ -330,15 +329,15 @@ export const useCallStore = create<CallStore>()((set, get) => ({
 
     // Sidecar stopped
     unlisteners.push(
-      listen<{ reason?: string; code?: number }>('telegram:call-sidecar-stopped', () => {
+      subscribe<{ reason?: string; code?: number }>('telegram:call-sidecar-stopped', () => {
         set({ activeCall: null, isMuted: false, volume: 1.0, audioLevel: 0, networkQuality: 5 });
       })
     );
 
     // Call error from sidecar
     unlisteners.push(
-      listen<{ message: string }>('telegram:call-error', (event) => {
-        set({ callError: event.payload.message });
+      subscribe<{ message: string }>('telegram:call-error', (payload) => {
+        set({ callError: payload.message });
       })
     );
 

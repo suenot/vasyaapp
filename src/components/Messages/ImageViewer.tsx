@@ -36,15 +36,21 @@ export const ImageViewer = ({ src, alt, caption, senderName, senderColor, date, 
     return () => window.removeEventListener('keydown', onKey);
   }, [handleClose]);
 
-  // Fullscreen on open, restore on close
+  // Fullscreen on open, restore on close (Tauri only — in a browser the
+  // overlay itself is the viewer, there is no app window to toggle)
   useEffect(() => {
+    document.body.style.overflow = 'hidden';
+    if (!('__TAURI_INTERNALS__' in window)) {
+      return () => {
+        document.body.style.overflow = '';
+      };
+    }
     const win = getCurrentWindow();
     let wasFullscreen = false;
     win.isFullscreen().then((fs) => {
       wasFullscreen = fs;
       if (!fs) win.setFullscreen(true);
     });
-    document.body.style.overflow = 'hidden';
     return () => {
       document.body.style.overflow = '';
       if (!wasFullscreen) win.setFullscreen(false);

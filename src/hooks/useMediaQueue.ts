@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../transport';
 import { useDownloadStore, DownloadItemInfo } from '../store/downloadStore';
 
 interface QueueItem {

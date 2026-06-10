@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useImperativeHandle, forwardRef, memo, useMemo } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../../transport';
 import { useMessagesStore, MessageBase } from '../../store/messagesStore';
 import { useSelectionStore } from '../../store/selectionStore';
 import { useSettingsStore } from '../../store/settingsStore';

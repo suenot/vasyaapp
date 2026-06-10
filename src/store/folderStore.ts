@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../transport';
 
 export type ChatTypeFilter = 'contacts' | 'non_contacts' | 'groups' | 'channels' | 'bots';
 

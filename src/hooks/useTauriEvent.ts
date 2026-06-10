@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { listen, UnlistenFn } from '@tauri-apps/api/event';
+import { subscribe } from '../transport';
 
 export function useTauriEvent<T>(
   eventName: string,
@@ -12,12 +12,12 @@ export function useTauriEvent<T>(
   useEffect(() => {
     if (!enabled) return;
 
-    let unlisten: UnlistenFn | null = null;
+    let unlisten: (() => void) | null = null;
     let mounted = true;
 
-    listen<T>(eventName, (event) => {
+    subscribe<T>(eventName, (payload) => {
       if (mounted) {
-        handlerRef.current(event.payload);
+        handlerRef.current(payload);
       }
     }).then((fn) => {
       if (mounted) {

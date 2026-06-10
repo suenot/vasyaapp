@@ -7,6 +7,11 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[workspace]
+members = ["vasya-core", "vasya-server"]
+# Standalone sidecar crates with their own lockfiles — not workspace members.
+exclude = ["stt-sidecar", "voip-sidecar"]
+
 [lib]
 # The `_lib` suffix may seem redundant but it is necessary
 # to make the lib name unique and wouldn't conflict with the bin name.
@@ -24,7 +29,8 @@ tauri-plugin-opener = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-fs = "2"
 
-# Telegram (из telegram-spy-rs)
+# Telegram engine (Tauri-free, shared with the server)
+vasya-core = { path = "vasya-core" }
 grammers-client = "0.8"
 grammers-session = "0.8"
 grammers-mtsender = "0.8"
@@ -47,11 +53,8 @@ thiserror = "2.0"
 # UUID для account_id
 uuid = { version = "1.0", features = ["v4", "serde"] }
 percent-encoding = "2"
-chacha20poly1305 = "0.10"
-keyring = { version = "3", features = ["apple-native", "windows-native"] }
 
 # Hashing
-sha2 = "0.10"
 hex = "0.4"
 
 # Time
@@ -82,12 +85,15 @@ async-trait = "0.1"
 # URL parsing for SSRF validation
 url = "2"
 
-# DH key exchange for Telegram voice calls
-num-bigint = "0.4"
-num-traits = "0.2"
+# Randomness for call commands (DH itself lives in vasya-core)
 num-integer = "0.1"
 rand = "0.8"
-sha1 = "0.10"
+
+# Embedded local API server (desktop only; keeps iOS/Android builds lean).
+# Cargo.toml can't use tauri's `desktop` cfg alias, so spell the target out.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+vasya-server = { path = "vasya-server" }
+axum = "0.8"
 
 [dev-dependencies]
 tempfile = "3"

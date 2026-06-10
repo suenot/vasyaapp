@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { invoke, convertFileSrc } from '@tauri-apps/api/core';
+import { invoke, convertFileSrc } from '../../transport';
 import { useAccountsStore } from '../../store/accountsStore';
 import { useAuthStore } from '../../store/authStore';
 import { useTranslation } from '../../i18n';

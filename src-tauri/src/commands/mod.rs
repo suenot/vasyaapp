@@ -17,6 +17,7 @@ pub mod search;
 pub mod calls;
 pub mod group_calls;
 pub mod voip_sidecar;
+pub mod local_api;
 
 pub use auth::*;
 pub use settings::*;
@@ -29,3 +30,4 @@ pub use topics::*;
 pub use search::*;
 pub use calls::*;
 pub use group_calls::*;
+pub use local_api::*;

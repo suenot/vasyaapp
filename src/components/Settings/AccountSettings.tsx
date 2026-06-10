@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke, getServerConfig } from '../../transport';
 import { ProfileSettings } from './ProfileSettings';
 import { useAccountsStore } from '../../store/accountsStore';
 import { useAuthStore } from '../../store/authStore';
@@ -114,6 +114,34 @@ export const AccountSettings = ({ onClose }: AccountSettingsProps) => {
 
   // Storage mode
   const { storageMode, backendUrl, backendApiKey, storageSwitching, storageError, setStorageMode } = useSettingsStore();
+
+  // Local API server (desktop): off-by-default toggle + bearer token management
+  const { localApiEnabled, localApiPort, localApiToken, localApiRunning, localApiBusy, localApiError, setLocalApiPort, startLocalApi, stopLocalApi } = useSettingsStore();
+  const [localApiTokenCopied, setLocalApiTokenCopied] = useState(false);
+  const handleCopyLocalApiToken = () => {
+    if (!localApiToken) return;
+    navigator.clipboard.writeText(localApiToken);
+    setLocalApiTokenCopied(true);
+    setTimeout(() => setLocalApiTokenCopied(false), 1500);
+  };
+  // Remote-server mode (desktop): embedded engine vs external vasya-server.
+  // Switching restarts the app; per-mode account lists are swapped so coming
+  // back to embedded restores today's accounts (logic in settingsStore).
+  const { transportMode, switchTransportMode } = useSettingsStore();
+  const [remoteModeBusy, setRemoteModeBusy] = useState(false);
+  const [remoteModeError, setRemoteModeError] = useState<string | null>(null);
+  const remoteServerUrl = getServerConfig()?.baseUrl ?? null;
+  const handleRemoteModeToggle = async (enabled: boolean) => {
+    setRemoteModeBusy(true);
+    setRemoteModeError(null);
+    try {
+      await switchTransportMode(enabled ? 'remote' : 'embedded');
+    } catch (err) {
+      setRemoteModeError(err instanceof Error ? err.message : String(err));
+      setRemoteModeBusy(false);
+    }
+  };
+
   const [tempBackendUrl, setTempBackendUrl] = useState(backendUrl);
   const [tempApiKey, setTempApiKey] = useState(backendApiKey);
   const [tempStorageMode, setTempStorageMode] = useState<StorageMode>(storageMode);
@@ -398,6 +426,117 @@ export const AccountSettings = ({ onClose }: AccountSettingsProps) => {
           </label>
         </div>
       </div>
+
+      <div className="settings-group">
+        <h3>{t('local_api_title')}</h3>
+        <div className="settings-item toggle">
+          <div className="settings-item-label">
+            <div className="settings-item-title">{t('local_api_toggle')}</div>
+            <div className="settings-item-description">{t('local_api_desc')}</div>
+          </div>
+          <label className="toggle-switch">
+            <input
+              type="checkbox"
+              checked={localApiEnabled}
+              disabled={localApiBusy}
+              onChange={(e) => (e.target.checked ? startLocalApi() : stopLocalApi())}
+            />
+            <span className="toggle-slider"></span>
+          </label>
+        </div>
+
+        <div className="settings-item">
+          <div className="settings-item-label">
+            <div className="settings-item-title">{t('local_api_port')}</div>
+            <div className="settings-item-description">{t('local_api_port_desc')}</div>
+          </div>
+          <input
+            type="number"
+            className="stt-language-select"
+            style={{ width: 110 }}
+            min={1024}
+            max={65535}
+            value={localApiPort}
+            disabled={localApiRunning || localApiBusy}
+            onChange={(e) => setLocalApiPort(Number(e.target.value))}
+          />
+        </div>
+
+        {localApiToken && (
+          <div className="settings-item" style={{ flexWrap: 'wrap', gap: 8 }}>
+            <div className="settings-item-label" style={{ width: '100%' }}>
+              <div className="settings-item-title">{t('local_api_token')}</div>
+              <div className="settings-item-description">{t('local_api_token_desc')}</div>
+            </div>
+            <input
+              type="text"
+              readOnly
+              className="stt-language-select"
+              style={{ flex: 1, minWidth: 220, fontFamily: 'monospace', fontSize: 12 }}
+              value={localApiToken}
+              onFocus={(e) => e.target.select()}
+              autoComplete="off"
+              spellCheck={false}
+            />
+            <button className="stt-model-download-btn" onClick={handleCopyLocalApiToken}>
+              {localApiTokenCopied ? t('local_api_copied') : t('local_api_copy')}
+            </button>
+            {localApiRunning && (
+              <button
+                className="stt-model-download-btn"
+                disabled={localApiBusy}
+                title={t('local_api_regenerate_desc')}
+                onClick={() => startLocalApi(true)}
+              >
+                {t('local_api_regenerate')}
+              </button>
+            )}
+          </div>
+        )}
+
+        {localApiRunning && (
+          <div className="stt-model-downloaded" style={{ padding: '4px 16px', fontSize: 13 }}>
+            {t('local_api_running', { port: String(localApiPort) })}
+          </div>
+        )}
+        {localApiError && (
+          <div className="form-error" style={{ padding: '4px 16px', fontSize: 13 }}>
+            {t('local_api_error')}: {localApiError}
+          </div>
+        )}
+      </div>
+
+      {/* Engine mode is a desktop choice; the web build is always remote. */}
+      {'__TAURI_INTERNALS__' in window && (
+      <div className="settings-group">
+        <h3>{t('remote_mode_title')}</h3>
+        <div className="settings-item toggle">
+          <div className="settings-item-label">
+            <div className="settings-item-title">{t('remote_mode_toggle')}</div>
+            <div className="settings-item-description">{t('remote_mode_desc')}</div>
+          </div>
+          <label className="toggle-switch">
+            <input
+              type="checkbox"
+              checked={transportMode === 'remote'}
+              disabled={remoteModeBusy}
+              onChange={(e) => handleRemoteModeToggle(e.target.checked)}
+            />
+            <span className="toggle-slider"></span>
+          </label>
+        </div>
+        {transportMode === 'remote' && remoteServerUrl && (
+          <div className="stt-model-downloaded" style={{ padding: '4px 16px', fontSize: 13 }}>
+            {t('remote_mode_server')}: {remoteServerUrl}
+          </div>
+        )}
+        {remoteModeError && (
+          <div className="form-error" style={{ padding: '4px 16px', fontSize: 13 }}>
+            {t('remote_mode_error')}: {remoteModeError}
+          </div>
+        )}
+      </div>
+      )}
     </div>
   );
 

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { invoke, convertFileSrc } from '@tauri-apps/api/core';
+import { invoke, convertFileSrc } from '../../transport';
 import { useChatsStore } from '../../store/chatsStore';
 import { useTranslation } from '../../i18n';
 import './ForwardDialog.css';
