@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { AsYouType } from 'libphonenumber-js';
 import { useTauriCommand } from '../../hooks/useTauriCommand';
 import { useAuthStore } from '../../store/authStore';
 import { useAccountsStore } from '../../store/accountsStore';
@@ -15,22 +16,17 @@ interface LoginFormProps {
   onCancel?: () => void;
 }
 
-/** Format phone: keep +, digits only, insert spaces as +X XXX XXX XX XX */
+/**
+ * Format an international phone number as-you-type using per-country grouping
+ * (libphonenumber, same rules as the native Telegram apps). A fixed mask like
+ * `+X XXX XXX XX XX` mis-groups most countries — e.g. UZ `+998 90 829 55 93`
+ * came out as `+9 989 082 95 59 3`.
+ */
 const formatPhone = (value: string): string => {
-  const digits = value.replace(/[^\d+]/g, '');
-  const hasPlus = digits.startsWith('+');
-  const nums = digits.replace(/\D/g, '');
-
-  if (!nums) return hasPlus ? '+' : '';
-
-  let formatted = '+';
-  for (let i = 0; i < nums.length && i < 15; i++) {
-    if (i === 1 || i === 4 || i === 7 || i === 9 || i === 11) {
-      formatted += ' ';
-    }
-    formatted += nums[i];
-  }
-  return formatted;
+  const nums = value.replace(/\D/g, '');
+  if (!nums) return value.includes('+') ? '+' : '';
+  // AsYouType is stateful; use a fresh instance per call for a controlled input.
+  return new AsYouType().input('+' + nums);
 };
 
 /** Strip formatting, return raw phone for API */

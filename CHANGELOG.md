@@ -16,6 +16,9 @@
 ### Performance
 - File sending uses raw IPC (binary body) instead of a JSON number array — ~4× smaller bridge payload.
 
+### Fixes
+- Login phone field now formats per country (libphonenumber as-you-type) like the native Telegram apps — e.g. `+998 90 829 55 93` instead of the mis-grouped `+9 989 082 95 59 3`.
+
 ## [0.7.6] - 2026-06-10
 ### Security
 - Deepgram API key is no longer embedded in the binary — add your own key in Settings → STT (or use local Whisper)
