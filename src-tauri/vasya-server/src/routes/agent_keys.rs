@@ -110,8 +110,13 @@ pub struct AuditQuery {
 
 pub async fn read_audit(
     State(ctx): State<Arc<ServerContext>>,
-    _user: Extension<UserId>,
+    user: Extension<UserId>,
     Query(q): Query<AuditQuery>,
 ) -> Result<Json<Vec<AuditEntry>>, ApiError> {
-    Ok(Json(ctx.audit.recent(q.limit.unwrap_or(100).min(1000))?))
+    // Per-user isolation: a caller only sees their own audit trail, never other
+    // users' activity (which leaks their account/chat ids via the path field).
+    Ok(Json(
+        ctx.audit
+            .recent_for(&user.0 .0, q.limit.unwrap_or(100).min(1000))?,
+    ))
 }

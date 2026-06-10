@@ -48,19 +48,44 @@ impl AuditLog {
         }
     }
 
-    /// The most recent `limit` entries (reads the whole file — fine for the
-    /// file-backed phase; a database store would query instead).
-    pub fn recent(&self, limit: usize) -> Result<Vec<AuditEntry>, crate::error::ApiError> {
-        // Take the lock so concurrent writes flush before we read.
+    /// Read the whole log (reads the whole file — fine for the file-backed
+    /// phase; a database store would query instead). Takes the lock so
+    /// concurrent writes flush before we read.
+    fn read_all(&self) -> Result<Vec<AuditEntry>, crate::error::ApiError> {
         let _guard = self.file.lock().unwrap();
-        let raw = match std::fs::read_to_string(&self.path) {
-            Ok(raw) => raw,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(e) => return Err(crate::error::ApiError::internal(e)),
-        };
-        let mut entries: Vec<AuditEntry> = raw
-            .lines()
-            .filter_map(|line| serde_json::from_str(line).ok())
+        match std::fs::read_to_string(&self.path) {
+            Ok(raw) => Ok(raw
+                .lines()
+                .filter_map(|line| serde_json::from_str(line).ok())
+                .collect()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+            Err(e) => Err(crate::error::ApiError::internal(e)),
+        }
+    }
+
+    /// The most recent `limit` entries across all users. Internal — never serve
+    /// this to a request without an admin gate (no admin role exists yet, so
+    /// HTTP callers must use `recent_for`).
+    pub fn recent(&self, limit: usize) -> Result<Vec<AuditEntry>, crate::error::ApiError> {
+        let mut entries = self.read_all()?;
+        if entries.len() > limit {
+            entries.drain(..entries.len() - limit);
+        }
+        Ok(entries)
+    }
+
+    /// The most recent `limit` entries belonging to `user_id`. Per-user
+    /// isolation: a caller only ever sees their own audit trail (an agent
+    /// key's owner is its `user_id`, so this also scopes agent activity).
+    pub fn recent_for(
+        &self,
+        user_id: &str,
+        limit: usize,
+    ) -> Result<Vec<AuditEntry>, crate::error::ApiError> {
+        let mut entries: Vec<AuditEntry> = self
+            .read_all()?
+            .into_iter()
+            .filter(|e| e.user_id == user_id)
             .collect();
         if entries.len() > limit {
             entries.drain(..entries.len() - limit);
@@ -104,5 +129,35 @@ mod tests {
         let entries = log.recent(1).unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].ts, 2);
+    }
+
+    #[test]
+    fn recent_for_isolates_by_user() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = AuditLog::open(dir.path().join("audit.log")).unwrap();
+
+        let mk = |ts: i64, user: &str| AuditEntry {
+            ts,
+            user_id: user.into(),
+            agent_key_id: None,
+            method: "POST".into(),
+            path: "/api/v1/accounts/secret/chats/9/messages".into(),
+            status: 200,
+        };
+        log.record(&mk(1, "alice"));
+        log.record(&mk(2, "bob"));
+        log.record(&mk(3, "alice"));
+
+        // alice sees only her two rows, never bob's (which would leak bob's path/ids)
+        let alice = log.recent_for("alice", 100).unwrap();
+        assert_eq!(alice.len(), 2);
+        assert!(alice.iter().all(|e| e.user_id == "alice"));
+
+        let bob = log.recent_for("bob", 100).unwrap();
+        assert_eq!(bob.len(), 1);
+        assert_eq!(bob[0].ts, 2);
+
+        // a user with no activity gets an empty trail, not everyone's
+        assert!(log.recent_for("carol", 100).unwrap().is_empty());
     }
 }
