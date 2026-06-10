@@ -7,6 +7,7 @@ use grammers_client::{Client, UpdatesConfiguration};
 use grammers_mtsender::SenderPool;
 use grammers_session::storages::SqliteSession;
 use grammers_session::updates::UpdatesLike;
+use grammers_session::SessionData;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock as StdRwLock};
@@ -15,6 +16,7 @@ use tokio::sync::{mpsc, RwLock};
 use tokio::task::JoinHandle;
 
 use super::auth::UserInfo;
+use super::encrypted_session::{get_or_create_master_key, EncryptedSession};
 use super::updates;
 
 /// Telegram client wrapper with metadata
@@ -40,6 +42,9 @@ pub struct TelegramClientManager {
     tasks: Arc<RwLock<HashMap<String, AccountTasks>>>,
     /// Stored updates receivers, to be consumed when starting updates handler
     updates_receivers: Arc<RwLock<HashMap<String, mpsc::UnboundedReceiver<UpdatesLike>>>>,
+    /// Session handles retained so pending changes can be flushed to disk
+    /// (the other clone lives inside the SenderPool runner).
+    sessions: Arc<RwLock<HashMap<String, Arc<EncryptedSession>>>>,
     pub sessions_dir: PathBuf,
     /// API credentials behind a std RwLock for in-place updates without replacing the manager
     credentials: StdRwLock<(i32, String)>,
@@ -51,9 +56,46 @@ impl TelegramClientManager {
             clients: Arc::new(RwLock::new(HashMap::new())),
             tasks: Arc::new(RwLock::new(HashMap::new())),
             updates_receivers: Arc::new(RwLock::new(HashMap::new())),
+            sessions: Arc::new(RwLock::new(HashMap::new())),
             sessions_dir,
             credentials: StdRwLock::new((api_id, api_hash)),
         }
+    }
+
+    /// Opens the encrypted session for an account, transparently migrating a
+    /// legacy plaintext SQLite session if one is found. The plaintext file is
+    /// deleted only after the encrypted snapshot is safely on disk.
+    fn open_session(&self, account_id: &str) -> Result<Arc<EncryptedSession>> {
+        let key = get_or_create_master_key(&self.sessions_dir)
+            .context("Failed to obtain session encryption key")?;
+        let enc_path = self.sessions_dir.join(format!("{}.session.enc", account_id));
+        let legacy_path = self.sessions_dir.join(format!("{}.session", account_id));
+
+        if enc_path.exists() {
+            return Ok(Arc::new(
+                EncryptedSession::load(&enc_path, &key)
+                    .context("Failed to load encrypted session")?,
+            ));
+        }
+
+        if legacy_path.exists() {
+            tracing::info!(account_id = %account_id, "Migrating plaintext session to encrypted storage");
+            let sqlite = SqliteSession::open(legacy_path.to_str().unwrap())
+                .context("Failed to open legacy session for migration")?;
+            // Keeps auth keys, the self peer and the updates state; the peer
+            // cache is rebuilt from the dialog list on the next sync.
+            let data = SessionData::from(sqlite);
+            let session = EncryptedSession::create(&enc_path, &key, data)
+                .context("Failed to write migrated encrypted session")?;
+            std::fs::remove_file(&legacy_path)
+                .context("Failed to remove plaintext session after migration")?;
+            return Ok(Arc::new(session));
+        }
+
+        Ok(Arc::new(
+            EncryptedSession::create(&enc_path, &key, SessionData::default())
+                .context("Failed to create session file")?,
+        ))
     }
 
     /// Get the current API ID
@@ -78,12 +120,11 @@ impl TelegramClientManager {
         account_id: String,
         phone: String,
     ) -> Result<Arc<TelegramClientWrapper>> {
-        let session_path = self.sessions_dir.join(format!("{}.session", account_id));
-
-        let session = Arc::new(
-            SqliteSession::open(session_path.to_str().unwrap())
-                .context("Failed to open/create session file")?,
-        );
+        let session = self.open_session(&account_id)?;
+        self.sessions
+            .write()
+            .await
+            .insert(account_id.clone(), session.clone());
 
         let pool = SenderPool::new(session, self.api_id());
         let client = Client::new(&pool);
@@ -199,23 +240,41 @@ impl TelegramClientManager {
         // Clean up any unused updates receiver
         self.updates_receivers.write().await.remove(account_id);
 
+        self.sessions.write().await.remove(account_id);
+
         let mut clients = self.clients.write().await;
         if let Some(wrapper) = clients.remove(account_id) {
             wrapper.client.disconnect();
 
-            let session_path = self.sessions_dir.join(format!("{}.session", account_id));
-            if session_path.exists() {
-                std::fs::remove_file(session_path)
-                    .context("Failed to remove session file")?;
+            for name in [
+                format!("{}.session", account_id),
+                format!("{}.session.enc", account_id),
+            ] {
+                let session_path = self.sessions_dir.join(name);
+                if session_path.exists() {
+                    std::fs::remove_file(session_path)
+                        .context("Failed to remove session file")?;
+                }
             }
         }
 
         Ok(())
     }
 
-    pub async fn save_session(&self, _account_id: &str) -> Result<()> {
-        // SqliteSession auto-saves
+    pub async fn save_session(&self, account_id: &str) -> Result<()> {
+        if let Some(session) = self.sessions.read().await.get(account_id) {
+            session.flush()?;
+        }
         Ok(())
+    }
+
+    /// Flush every session's pending changes to disk (call on app shutdown).
+    pub async fn flush_all_sessions(&self) {
+        for (account_id, session) in self.sessions.read().await.iter() {
+            if let Err(e) = session.flush() {
+                tracing::error!(account_id = %account_id, error = %e, "Failed to flush session");
+            }
+        }
     }
 
     pub async fn list_clients(&self) -> Vec<String> {
@@ -235,24 +294,41 @@ impl TelegramClientManager {
         let entries = std::fs::read_dir(&self.sessions_dir)
             .context("Failed to read sessions directory")?;
 
+        // Collect unique account ids from both storage formats: encrypted
+        // (`<id>.session.enc`) and legacy plaintext (`<id>.session`, migrated
+        // on open). The key file (`.session.key`) matches neither suffix.
+        let mut account_ids: Vec<String> = Vec::new();
         for entry in entries {
             let entry = entry.context("Failed to read directory entry")?;
-            let path = entry.path();
-
-            if path.extension().and_then(|s| s.to_str()) != Some("session") {
-                continue;
-            }
-
-            let Some(account_id) = path.file_stem().and_then(|s| s.to_str()).map(String::from) else {
+            let Some(name) = entry.file_name().to_str().map(String::from) else {
                 continue;
             };
+            let account_id = name
+                .strip_suffix(".session.enc")
+                .or_else(|| name.strip_suffix(".session"))
+                .unwrap_or_default();
+            if account_id.is_empty() || account_ids.iter().any(|a| a == account_id) {
+                continue;
+            }
+            account_ids.push(account_id.to_string());
+        }
 
+        for account_id in account_ids {
             tracing::info!(account_id = %account_id, "Loading session from disk");
 
-            let session = Arc::new(
-                SqliteSession::open(path.to_str().unwrap())
-                    .context("Failed to open session file")?,
-            );
+            let session = match self.open_session(&account_id) {
+                Ok(session) => session,
+                Err(e) => {
+                    // Don't take the whole app down over one bad session file;
+                    // the user can re-login that account.
+                    tracing::error!(account_id = %account_id, error = %e, "Failed to open session, skipping account");
+                    continue;
+                }
+            };
+            self.sessions
+                .write()
+                .await
+                .insert(account_id.clone(), session.clone());
 
             let pool = SenderPool::new(session, self.api_id());
             let client = Client::new(&pool);

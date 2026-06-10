@@ -197,6 +197,19 @@ pub fn run() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|app_handle, event| {
+            if let tauri::RunEvent::Exit = event {
+                // Auth keys are persisted eagerly; this flushes the throttled
+                // tail (updates state / peer cache) of every open session.
+                let state = app_handle.state::<Arc<RwLock<AppState>>>();
+                tauri::async_runtime::block_on(async {
+                    let guard = state.read().await;
+                    if let Some(cm) = guard.client_manager.as_ref() {
+                        cm.flush_all_sessions().await;
+                    }
+                });
+            }
+        });
 }

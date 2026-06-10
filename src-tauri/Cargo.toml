@@ -1,6 +1,6 @@
 [package]
 name = "telegram-client"
-version = "0.7.6"
+version = "0.7.7"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -46,6 +46,9 @@ thiserror = "2.0"
 
 # UUID для account_id
 uuid = { version = "1.0", features = ["v4", "serde"] }
+percent-encoding = "2"
+chacha20poly1305 = "0.10"
+keyring = { version = "3", features = ["apple-native", "windows-native"] }
 
 # Hashing
 sha2 = "0.10"
