@@ -6,12 +6,11 @@ Cross-platform Telegram client built with Tauri 2.0 + React 19 + TypeScript. Fea
 
 ## 🌐 Web version
 
-The same UI also runs in the browser against a remote **`vasya-server`** (the Telegram session host) — no Tauri runtime required.
+The same UI also runs in the browser against a remote **`vasya-server`** (the Telegram session host) — no Tauri runtime required. Self-hosted: bring your own server and domain.
 
-- **Live:** https://vasya.marketmaker.cc · **API:** https://vasya-api.marketmaker.cc
-- **Connect:** open the web app, enter the server URL (hosted builds pre-fill it via `VITE_VASYA_API_URL`), then sign in with email + password (issues a JWT) or paste an access token.
-- **Build:** `VITE_VASYA_API_URL=https://vasya-api.marketmaker.cc npm run build` → serve `dist/`.
-- The engine transport is abstracted (`src/transport/`): Tauri IPC on desktop, HTTP/SSE in the browser. See `backend/deploy/` for the production stack (vasya-server + sync backend + Caddy).
+- **Connect:** open the web app, enter your vasya-server URL, then sign in with email + password (issues a JWT) or paste an access token. Builds can pre-fill the API origin via the `VITE_VASYA_API_URL` build var.
+- **Build:** `VITE_VASYA_API_URL=https://your-api.example.com npm run build` → serve `dist/`.
+- The engine transport is abstracted (`src/transport/`): Tauri IPC on desktop, HTTP/SSE in the browser. The production stack (vasya-server + sync backend + Caddy) lives in `backend/deploy/` — see its README to deploy your own.
 
 ## ✨ Features
 

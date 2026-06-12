@@ -2,7 +2,7 @@
 
 ## [0.8.0] - 2026-06-12
 ### Web
-- **Vasyapp now runs in the browser.** The same React UI talks to a remote `vasya-server` over HTTP/SSE instead of the in-process Tauri engine. Live at **https://vasya.marketmaker.cc** (API at **https://vasya-api.marketmaker.cc**). Connect with a server URL + a JWT (email/password against the backend) or an access token; hosted builds pre-fill the API origin via the `VITE_VASYA_API_URL` build var.
+- **Vasyapp now runs in the browser.** The same React UI talks to a remote `vasya-server` over HTTP/SSE instead of the in-process Tauri engine. Self-host it from `backend/deploy/`; connect with your server URL + a JWT (email/password against the backend) or an access token. Builds can pre-fill the API origin via the `VITE_VASYA_API_URL` build var.
 
 ### Features
 - **Date separators** in the message list — Telegram-style "Today / Yesterday / 10 June" day dividers between messages of different calendar days.
