@@ -4,7 +4,7 @@
 
 use anyhow::{Context, Result};
 use grammers_client::{Client, UpdatesConfiguration};
-use grammers_mtsender::SenderPool;
+use grammers_mtsender::{ConnectionParams, SenderPool};
 use grammers_session::storages::SqliteSession;
 use grammers_session::updates::UpdatesLike;
 use grammers_session::SessionData;
@@ -51,6 +51,32 @@ pub struct TelegramClientManager {
     /// Where the session encryption master key comes from (keychain on
     /// desktop, env/file on servers).
     key_provider: Arc<dyn MasterKeyProvider>,
+    /// Optional SOCKS5 proxy for all Telegram (MTProto) connections, used when
+    /// the host's IP has Telegram blocked. `None` = connect directly (default,
+    /// unchanged). Set via the `TELEGRAM_PROXY_URL` env var (the feature flag):
+    /// e.g. `socks5://user:pass@127.0.0.1:1080`.
+    proxy_url: Option<String>,
+}
+
+/// Strip credentials from a proxy URL so it is safe to log.
+/// `socks5://user:pass@host:port` -> `socks5://host:port`.
+fn proxy_url_for_log(url: &str) -> String {
+    match url.split_once("://") {
+        Some((scheme, rest)) => {
+            let hostpart = rest.rsplit('@').next().unwrap_or(rest);
+            format!("{scheme}://{hostpart}")
+        }
+        None => "***".to_string(),
+    }
+}
+
+/// Read the Telegram proxy URL from the environment (the feature flag).
+/// Absent or empty -> `None` (direct connection, unchanged behavior).
+fn proxy_from_env() -> Option<String> {
+    std::env::var("TELEGRAM_PROXY_URL")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
 }
 
 impl TelegramClientManager {
@@ -69,6 +95,13 @@ impl TelegramClientManager {
         api_hash: String,
         key_provider: Arc<dyn MasterKeyProvider>,
     ) -> Self {
+        let proxy_url = proxy_from_env();
+        if let Some(url) = &proxy_url {
+            tracing::info!(
+                proxy = %proxy_url_for_log(url),
+                "Telegram connections will be routed through a SOCKS5 proxy (TELEGRAM_PROXY_URL)"
+            );
+        }
         Self {
             clients: Arc::new(RwLock::new(HashMap::new())),
             tasks: Arc::new(RwLock::new(HashMap::new())),
@@ -77,6 +110,24 @@ impl TelegramClientManager {
             sessions_dir,
             credentials: StdRwLock::new((api_id, api_hash)),
             key_provider,
+            proxy_url,
+        }
+    }
+
+    /// Build a `SenderPool` for a session, honoring the optional SOCKS5 proxy.
+    /// `proxy_url == None` reproduces the historical `SenderPool::new` path.
+    fn build_pool(&self, session: Arc<EncryptedSession>) -> SenderPool {
+        let api_id = self.api_id();
+        match &self.proxy_url {
+            Some(url) => SenderPool::with_configuration(
+                session,
+                api_id,
+                ConnectionParams {
+                    proxy_url: Some(url.clone()),
+                    ..Default::default()
+                },
+            ),
+            None => SenderPool::new(session, api_id),
         }
     }
 
@@ -146,7 +197,7 @@ impl TelegramClientManager {
             .await
             .insert(account_id.clone(), session.clone());
 
-        let pool = SenderPool::new(session, self.api_id());
+        let pool = self.build_pool(session);
         let client = Client::new(&pool);
 
         // Destructure pool — runner drives the network, save updates receiver
@@ -355,7 +406,7 @@ impl TelegramClientManager {
                 .await
                 .insert(account_id.clone(), session.clone());
 
-            let pool = SenderPool::new(session, self.api_id());
+            let pool = self.build_pool(session);
             let client = Client::new(&pool);
 
             let SenderPool {
@@ -386,5 +437,26 @@ impl TelegramClientManager {
 
         tracing::info!(count = loaded.len(), "Sessions loaded from disk");
         Ok(loaded)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::proxy_url_for_log;
+
+    #[test]
+    fn proxy_url_for_log_strips_credentials() {
+        // Password must never reach the logs.
+        assert_eq!(
+            proxy_url_for_log("socks5://vasya:s3cr3t@127.0.0.1:1080"),
+            "socks5://127.0.0.1:1080"
+        );
+        // No credentials -> unchanged.
+        assert_eq!(
+            proxy_url_for_log("socks5://127.0.0.1:1080"),
+            "socks5://127.0.0.1:1080"
+        );
+        // Malformed -> fully redacted, never echoed back.
+        assert_eq!(proxy_url_for_log("not-a-url"), "***");
     }
 }

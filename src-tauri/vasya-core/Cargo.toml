@@ -6,9 +6,11 @@ edition = "2021"
 
 [dependencies]
 # Telegram MTProto engine
-grammers-client = "0.8"
+# `proxy` feature exposes ConnectionParams.proxy_url (SOCKS5) for egress over a
+# Telegram-blocked IP. See TELEGRAM_PROXY_URL handling in telegram/client_manager.rs.
+grammers-client = { version = "0.8", features = ["proxy"] }
 grammers-session = "0.8"
-grammers-mtsender = "0.8"
+grammers-mtsender = { version = "0.8", features = ["proxy"] }
 grammers-tl-types = "0.8"
 
 # Async runtime (spawn, sync primitives, select!, timers)
