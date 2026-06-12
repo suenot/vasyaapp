@@ -119,7 +119,26 @@ export const MediaAttachment = ({
   // WebPage preview
   if (media.media_type === 'webpage') {
     const urlMatch = messageText?.match(/(https?:\/\/[^\s]+)/);
-    const url = urlMatch ? urlMatch[1] : null;
+    const url = media.webpage_url ?? (urlMatch ? urlMatch[1] : null);
+    const hasRich = Boolean(media.webpage_site_name || media.webpage_title || media.webpage_description);
+
+    // Rich card (Telegram-style) when the backend supplies page metadata.
+    if (hasRich) {
+      return (
+        <a
+          href={url ?? undefined}
+          target={url ? '_blank' : undefined}
+          rel="noopener noreferrer"
+          className="media-webpage rich"
+        >
+          {media.webpage_site_name && <div className="webpage-site">{media.webpage_site_name}</div>}
+          {media.webpage_title && <div className="webpage-title">{media.webpage_title}</div>}
+          {media.webpage_description && <div className="webpage-desc">{media.webpage_description}</div>}
+        </a>
+      );
+    }
+
+    // Fallback: minimal preview (no metadata available, e.g. desktop backend).
     return (
       <div className="media-webpage">
         <div className="webpage-icon">🔗</div>

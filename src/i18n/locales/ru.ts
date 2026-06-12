@@ -378,6 +378,8 @@ export const ru: Record<TranslationKey, string> = {
 
   // Media Attachment
   link_preview: 'Предпросмотр ссылки',
+  today: 'Сегодня',
+  yesterday: 'Вчера',
   downloading_type: 'Загрузка {type}...',
   tap_to_download: 'Нажмите для загрузки',
   loading_type: 'Загрузка {type}...',

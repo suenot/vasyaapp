@@ -29,3 +29,45 @@
   color: var(--text-secondary);
   margin-top: 4px;
 }
+
+/* Rich link preview card (Telegram-style), shown when webPage metadata exists. */
+.media-webpage.rich {
+  display: block;
+  max-width: 420px;
+  margin-top: 4px;
+  padding: 6px 10px;
+  border-left: 3px solid var(--accent-color);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  text-decoration: none;
+  color: var(--text-primary);
+}
+
+.media-webpage.rich:hover {
+  filter: brightness(1.05);
+}
+
+.media-webpage.rich .webpage-site {
+  color: var(--accent-color);
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.media-webpage.rich .webpage-title {
+  font-weight: 600;
+  font-size: 14px;
+  margin-top: 1px;
+  word-break: break-word;
+}
+
+.media-webpage.rich .webpage-desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}

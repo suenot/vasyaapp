@@ -13,6 +13,7 @@ import { MessageContextMenu } from './MessageContextMenu';
 import { SelectionBar } from './SelectionBar';
 import { MarkdownRenderer, hasMarkdown } from './MarkdownRenderer';
 import { ForwardDialog } from './ForwardDialog';
+import { useTranslation } from '../../i18n';
 import './MessageList.css';
 
 interface MessageListProps {
@@ -62,6 +63,33 @@ const formatTime = (timestamp: number) =>
     hour: '2-digit',
     minute: '2-digit',
   });
+
+// Local midnight (ms) for a unix-seconds timestamp — used to bucket messages by day.
+const startOfDay = (timestamp: number) => {
+  const d = new Date(timestamp * 1000);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+};
+
+const isSameDay = (a: number, b: number) => startOfDay(a) === startOfDay(b);
+
+// Telegram-style day divider label: Today / Yesterday / "10 June" / "10 June 2024".
+const formatDaySeparator = (
+  timestamp: number,
+  language: string,
+  todayLabel: string,
+  yesterdayLabel: string,
+): string => {
+  const diffDays = Math.round((startOfDay(Date.now() / 1000) - startOfDay(timestamp)) / 86400000);
+  if (diffDays === 0) return todayLabel;
+  if (diffDays === 1) return yesterdayLabel;
+  const d = new Date(timestamp * 1000);
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleDateString(language === 'ru' ? 'ru-RU' : 'en-US', {
+    day: 'numeric',
+    month: 'long',
+    ...(sameYear ? {} : { year: 'numeric' }),
+  });
+};
 
 // 8 sender colors for group chats (Telegram-style palette)
 const SENDER_COLORS = [
@@ -443,6 +471,7 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(({ ac
   const messages = useMessagesStore((s) => s.messagesByChat[chatId] ?? EMPTY_MESSAGES);
   const mergeEnabled = useSettingsStore((s) => s.mergeMessages);
   const mergedGroups = useMergedMessages(messages, mergeEnabled);
+  const { t, language } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
   const pendingScrollRef = useRef<number | null>(null);
 
@@ -976,6 +1005,9 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(({ ac
               const isGroupHighlighted = isMerged
                 ? group.messages.some((m) => highlightedMessageId === m.id)
                 : highlightedMessageId === message.id;
+              // Day divider above the first message of each calendar day.
+              const prevGroup = index > 0 ? mergedGroups[index - 1] : null;
+              const showDaySeparator = !prevGroup || !isSameDay(prevGroup.display.date, message.date);
 
               return (
                 <div
@@ -993,6 +1025,11 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(({ ac
                     display: 'flow-root',
                   }}
                 >
+                  {showDaySeparator && (
+                    <div className="day-separator">
+                      <span>{formatDaySeparator(message.date, language, t('today'), t('yesterday'))}</span>
+                    </div>
+                  )}
                   {isMerged ? (
                     <MergedMessageItem
                       group={group}

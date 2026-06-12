@@ -31,12 +31,30 @@ fn extract_media_info(msg: &GrammersMessage) -> Option<Vec<MediaInfo>> {
             Media::Photo(_) => (None, Some("image/jpeg".to_string())),
             _ => (None, None),
         };
+        // Link preview metadata (Telegram-generated webPage), so the client can
+        // render a rich card instead of a bare "Link Preview" placeholder.
+        let (webpage_url, webpage_site_name, webpage_title, webpage_description) = match &media {
+            Media::WebPage(wp) => match &wp.raw.webpage {
+                tl::enums::WebPage::Page(page) => (
+                    Some(page.url.clone()),
+                    page.site_name.clone(),
+                    page.title.clone(),
+                    page.description.clone(),
+                ),
+                _ => (None, None, None, None),
+            },
+            _ => (None, None, None, None),
+        };
         vec![MediaInfo {
             media_type,
             file_path: None,
             file_name: None,
             file_size,
             mime_type,
+            webpage_url,
+            webpage_site_name,
+            webpage_title,
+            webpage_description,
         }]
     })
 }

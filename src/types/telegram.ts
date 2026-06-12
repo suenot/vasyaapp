@@ -38,6 +38,11 @@ export interface MediaInfo {
   file_size?: number;
   mime_type?: string;
   thumbnail_path?: string;
+  // Link preview metadata (media_type === 'webpage')
+  webpage_url?: string;
+  webpage_site_name?: string;
+  webpage_title?: string;
+  webpage_description?: string;
 }
 
 export interface Message {

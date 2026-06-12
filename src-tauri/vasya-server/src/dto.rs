@@ -33,6 +33,15 @@ pub struct MediaInfo {
     pub file_name: Option<String>,
     pub file_size: Option<u64>,
     pub mime_type: Option<String>,
+    // Link preview metadata, populated for `media_type == "webpage"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub webpage_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub webpage_site_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub webpage_title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub webpage_description: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, SimpleObject)]

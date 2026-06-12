@@ -10,8 +10,14 @@ import './LoginForm.css';
  * against the sync backend's /api/auth/login, which issues a JWT the API
  * accepts when both share JWT_SECRET.
  */
+/** Hosted builds set VITE_VASYA_API_URL so the field pre-fills the public API
+ * origin; desktop/dev builds leave it unset and keep the loopback default. */
+const DEFAULT_SERVER_URL =
+  (import.meta.env as Record<string, string | undefined>).VITE_VASYA_API_URL ??
+  'http://127.0.0.1:8787';
+
 export const ServerConnect = () => {
-  const [serverUrl, setServerUrl] = useState('http://127.0.0.1:8787');
+  const [serverUrl, setServerUrl] = useState(DEFAULT_SERVER_URL);
   const [method, setMethod] = useState<'token' | 'password'>('token');
   const [token, setToken] = useState('');
   const [email, setEmail] = useState('');

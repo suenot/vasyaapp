@@ -704,3 +704,23 @@
 :root[data-theme="blue"] .message.outgoing .merged-count {
   color: #fff;
 }
+
+/* Telegram-style day divider between messages of different calendar days. */
+.day-separator {
+  display: flex;
+  justify-content: center;
+  margin: 14px 0 10px;
+  pointer-events: none;
+}
+
+.day-separator span {
+  background: rgba(0, 0, 0, 0.35);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1;
+  padding: 5px 12px;
+  border-radius: 14px;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}

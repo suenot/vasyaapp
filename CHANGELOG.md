@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.8.0] - 2026-06-12
+### Web
+- **Vasyapp now runs in the browser.** The same React UI talks to a remote `vasya-server` over HTTP/SSE instead of the in-process Tauri engine. Live at **https://vasya.marketmaker.cc** (API at **https://vasya-api.marketmaker.cc**). Connect with a server URL + a JWT (email/password against the backend) or an access token; hosted builds pre-fill the API origin via the `VITE_VASYA_API_URL` build var.
+
+### Features
+- **Date separators** in the message list — Telegram-style "Today / Yesterday / 10 June" day dividers between messages of different calendar days.
+- **Rich link previews** — pages shared in chat render a card (site name, title, description) instead of a bare "Link Preview" placeholder. `vasya-server` now extracts the Telegram `webPage` metadata; the desktop backend still shows the minimal preview (parity pending).
+
+### Server / infra
+- **Telegram over a SOCKS5 proxy** — set `TELEGRAM_PROXY_URL` (e.g. `socks5://user:pass@127.0.0.1:1080`) to route MTProto through an egress when the host's own IP has Telegram blocked. Unset = direct connection (unchanged). Enabled via grammers' `proxy` feature in `vasya-core`.
+
 ## [0.7.7] - 2026-06-10
 ### Security
 - **Telegram sessions are now encrypted at rest** (ChaCha20-Poly1305). The master key lives in the OS keychain (Keychain / Credential Manager), with a 0600 key-file fallback. Existing plaintext sessions are migrated automatically on first launch and the plaintext file is deleted.

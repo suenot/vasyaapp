@@ -376,6 +376,8 @@ export const en = {
 
   // Media Attachment
   link_preview: 'Link Preview',
+  today: 'Today',
+  yesterday: 'Yesterday',
   downloading_type: 'Downloading {type}...',
   tap_to_download: 'Tap to download',
   loading_type: 'Loading {type}...',

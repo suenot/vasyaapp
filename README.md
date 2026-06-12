@@ -4,7 +4,18 @@
 
 Cross-platform Telegram client built with Tauri 2.0 + React 19 + TypeScript. Features voice transcription, media handling, and optimized message loading.
 
+## 🌐 Web version
+
+The same UI also runs in the browser against a remote **`vasya-server`** (the Telegram session host) — no Tauri runtime required.
+
+- **Live:** https://vasya.marketmaker.cc · **API:** https://vasya-api.marketmaker.cc
+- **Connect:** open the web app, enter the server URL (hosted builds pre-fill it via `VITE_VASYA_API_URL`), then sign in with email + password (issues a JWT) or paste an access token.
+- **Build:** `VITE_VASYA_API_URL=https://vasya-api.marketmaker.cc npm run build` → serve `dist/`.
+- The engine transport is abstracted (`src/transport/`): Tauri IPC on desktop, HTTP/SSE in the browser. See `backend/deploy/` for the production stack (vasya-server + sync backend + Caddy).
+
 ## ✨ Features
+
+- **Messaging UX**: Telegram-style date separators, rich link previews, and message grouping
 
 - **Telegram Integration**: Full MTProto support via grammers-client v0.8
 - **Voice Transcription (STT)**:
