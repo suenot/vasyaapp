@@ -1,0 +1,23 @@
+name: Redeploy landing site
+
+# Rebuilds the marketing site (vasya.app, repo: suenot/vasya-landing-astro) so it
+# re-fetches the latest GitHub release at build time — version badge, download
+# links and changelog all track releases automatically.
+#
+# Fires on release *publish* (not the tag push): the release workflow creates a
+# DRAFT, and the GitHub API doesn't expose drafts to the site's unauthenticated
+# build-time fetch, so the rebuild must happen once the release is published.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  trigger-vercel:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Vercel deploy hook for vasya.app
+        env:
+          HOOK: ${{ secrets.VERCEL_DEPLOY_HOOK }}
+        run: curl -fsS -X POST "$HOOK"
