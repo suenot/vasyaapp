@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+### Server / infra
+- **Finer-grained agent-key scopes.** Destructive operations now have their own scopes instead of being bundled with broad ones: `accounts:delete` (log out / delete an account — was `telegram:login`), `chats:delete` (delete/leave a chat — was `chats:write`) and `messages:forward` (was `messages:send`). `telegram:login` now covers login only and `chats:write` group/channel creation only. `GET /api/v1/agent-keys/scopes` now returns `{scope, description}` objects.
+  - **Breaking (pre-1.0):** existing `vk_` keys are **not** auto-granted the new destructive scopes — re-issue any key that needs to delete accounts/chats or forward messages.
+- **Per-account allowlist on agent keys.** Pass `accountIds` when creating a key (`POST /api/v1/agent-keys`) to restrict it to specific accounts; requests to `/accounts/{acc}/…` outside the list return 403 `account not in key allowlist`. Omitted/empty = all of the owner's accounts (unchanged). The allowlist is reflected in `GET /api/v1/agent-keys`.
+
 ## [0.8.0] - 2026-06-12
 ### Web
 - **Vasyapp now runs in the browser.** The same React UI talks to a remote `vasya-server` over HTTP/SSE instead of the in-process Tauri engine. Self-host it from `backend/deploy/`; connect with your server URL + a JWT (email/password against the backend) or an access token. Builds can pre-fill the API origin via the `VITE_VASYA_API_URL` build var.

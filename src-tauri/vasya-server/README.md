@@ -40,13 +40,53 @@ curl -s -H "$TOK" -H 'content-type: application/json' \
   $BASE/agent-keys
 # -> {"id":"ak..","secret":"vk_ak.._..", ...}
 curl -s -H "$TOK" $BASE/agent-keys            # list (no secrets)
-curl -s -H "$TOK" $BASE/agent-keys/scopes     # valid scope names
+curl -s -H "$TOK" $BASE/agent-keys/scopes     # valid scopes + descriptions
 curl -s -X DELETE -H "$TOK" $BASE/agent-keys/<id>   # revoke
 ```
 
+### Scopes
+
+A key carries one or more scopes; out-of-scope calls get 403 with the
+missing scope named. Destructive operations have their own narrow scopes so
+they are never granted implicitly:
+
+| Scope | Grants |
+| --- | --- |
+| `accounts:read` | List accounts and read account/avatar metadata |
+| `accounts:delete` | Log out / delete an account (`DELETE /accounts/{acc}`) |
+| `telegram:login` | Log in a Telegram account (login endpoints only) |
+| `chats:read` | List chats, contacts, topics, search and chat photos |
+| `chats:write` | Create groups and channels |
+| `chats:delete` | Delete/leave a chat (`DELETE /accounts/{acc}/chats/{chat_id}`) |
+| `messages:read` | Read messages, message media and search messages |
+| `messages:send` | Send messages and media, mark messages read |
+| `messages:forward` | Forward messages (`POST /accounts/{acc}/messages/forward`) |
+| `folders:read` | Read folders and tabs |
+| `folders:write` | Create, update and delete folders and tabs |
+| `events:read` | Subscribe to the server-sent events stream |
+| `calls:use` | Use voice/video and group calls |
+| `stt:use` | Use speech-to-text |
+
+> **Breaking change (pre-1.0):** `accounts:delete`, `chats:delete` and
+> `messages:forward` were split out of `telegram:login`, `chats:write` and
+> `messages:send` respectively. Existing keys are **not** auto-granted the new
+> destructive scopes — re-issue keys that need them.
+
+### Per-account allowlist
+
+Pass `accountIds` at creation to restrict a key to specific accounts; any
+`/accounts/{acc}/…` request for an account outside the list gets
+403 `account not in key allowlist`. Omitted/empty = all of the owner's accounts.
+
+```sh
+curl -s -H "$TOK" -H 'content-type: application/json' \
+  -d '{"name":"chat-x-bot","scopes":["messages:send"],"accountIds":["<acc-uuid>"]}' \
+  $BASE/agent-keys
+```
+
 The `vk_...` secret is a normal bearer token; only a SHA-256 hash is stored.
-Out-of-scope calls get 403 with the missing scope named. Agent keys cannot
-manage keys, read the audit log, or use GraphQL (REST/MCP only this phase).
+Agent keys cannot manage keys, read the audit log, or use GraphQL (REST/MCP
+only this phase).
 
 Audit: every mutating call (user or agent) is appended to
 `data_dir/audit.log` — `GET /api/v1/audit?limit=` (human only) reads it.

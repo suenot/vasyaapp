@@ -19,16 +19,38 @@ use crate::error::ApiError;
 /// All scopes a key may hold. Human sessions implicitly hold all of them.
 pub const ALL_SCOPES: &[&str] = &[
     "accounts:read",
+    "accounts:delete",
     "telegram:login",
     "chats:read",
     "chats:write",
+    "chats:delete",
     "messages:read",
     "messages:send",
+    "messages:forward",
     "folders:read",
     "folders:write",
     "events:read",
     "calls:use",
     "stt:use",
+];
+
+/// One-line description per scope, for UIs building key-creation forms.
+/// Order/contents must stay in sync with [`ALL_SCOPES`].
+pub const SCOPE_DESCRIPTIONS: &[(&str, &str)] = &[
+    ("accounts:read", "List accounts and read account/avatar metadata"),
+    ("accounts:delete", "Log out / delete an account (DELETE /accounts/{acc})"),
+    ("telegram:login", "Log in a Telegram account (login endpoints only)"),
+    ("chats:read", "List chats, contacts, topics, search and chat photos"),
+    ("chats:write", "Create groups and channels"),
+    ("chats:delete", "Delete/leave a chat (DELETE /accounts/{acc}/chats/{chat_id})"),
+    ("messages:read", "Read messages, message media and search messages"),
+    ("messages:send", "Send messages and media, mark messages read"),
+    ("messages:forward", "Forward messages (POST /accounts/{acc}/messages/forward)"),
+    ("folders:read", "Read folders and tabs"),
+    ("folders:write", "Create, update and delete folders and tabs"),
+    ("events:read", "Subscribe to the server-sent events stream"),
+    ("calls:use", "Use voice/video and group calls"),
+    ("stt:use", "Use speech-to-text"),
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,6 +61,10 @@ pub struct AgentKeyRecord {
     /// SHA-256 hex of the full secret; the secret itself is never stored.
     pub key_hash: String,
     pub scopes: Vec<String>,
+    /// Optional per-account allowlist. `None`/empty = all of the owner's
+    /// accounts (default); non-empty = only these account UUIDs are reachable.
+    #[serde(default)]
+    pub account_ids: Option<Vec<String>>,
     pub created_at: i64,
     pub expires_at: Option<i64>,
     pub revoked: bool,
@@ -49,11 +75,23 @@ pub struct AgentKeyRecord {
 pub struct AgentIdentity {
     pub key_id: String,
     pub scopes: Vec<String>,
+    /// `None`/empty = every account of the owner; non-empty = allowlist.
+    pub account_ids: Option<Vec<String>>,
 }
 
 impl AgentIdentity {
     pub fn has_scope(&self, scope: &str) -> bool {
         self.scopes.iter().any(|s| s == scope)
+    }
+
+    /// Whether this key may target the given account id. A key with no
+    /// allowlist (or an empty one) may reach every account of its owner.
+    pub fn allows_account(&self, account_id: &str) -> bool {
+        match &self.account_ids {
+            None => true,
+            Some(ids) if ids.is_empty() => true,
+            Some(ids) => ids.iter().any(|a| a == account_id),
+        }
     }
 }
 
@@ -105,6 +143,7 @@ impl AgentKeyStore {
         user_id: &str,
         name: &str,
         scopes: Vec<String>,
+        account_ids: Option<Vec<String>>,
         ttl_secs: Option<u64>,
     ) -> Result<(AgentKeyRecord, String), ApiError> {
         for scope in &scopes {
@@ -115,6 +154,9 @@ impl AgentKeyStore {
         if scopes.is_empty() {
             return Err(ApiError::BadRequest("At least one scope is required".into()));
         }
+        // Normalise an empty allowlist to `None` so "all accounts" has one
+        // representation on disk and in the response.
+        let account_ids = account_ids.filter(|ids| !ids.is_empty());
 
         let id = format!("ak{}", random_hex(4));
         let secret = format!("vk_{}_{}", id, random_hex(32));
@@ -124,6 +166,7 @@ impl AgentKeyStore {
             name: name.to_string(),
             key_hash: sha256_hex(&secret),
             scopes,
+            account_ids,
             created_at: now(),
             expires_at: ttl_secs.map(|t| now() + t as i64),
             revoked: false,
@@ -157,7 +200,11 @@ impl AgentKeyStore {
         }
         Some((
             record.user_id.clone(),
-            AgentIdentity { key_id: record.id.clone(), scopes: record.scopes.clone() },
+            AgentIdentity {
+                key_id: record.id.clone(),
+                scopes: record.scopes.clone(),
+                account_ids: record.account_ids.clone(),
+            },
         ))
     }
 
@@ -211,7 +258,7 @@ mod tests {
     fn create_and_authenticate() {
         let (_dir, store) = store();
         let (record, secret) = store
-            .create("alice", "bot", vec!["messages:read".into()], None)
+            .create("alice", "bot", vec!["messages:read".into()], None, None)
             .unwrap();
         assert!(secret.starts_with(&format!("vk_{}_", record.id)));
 
@@ -220,6 +267,8 @@ mod tests {
         assert_eq!(identity.key_id, record.id);
         assert!(identity.has_scope("messages:read"));
         assert!(!identity.has_scope("messages:send"));
+        // No allowlist => every account is reachable.
+        assert!(identity.allows_account("anything"));
 
         // Wrong secret with a valid id prefix fails.
         assert!(store.authenticate(&format!("vk_{}_{}", record.id, "0".repeat(64))).is_none());
@@ -229,15 +278,41 @@ mod tests {
     #[test]
     fn unknown_or_empty_scopes_rejected() {
         let (_dir, store) = store();
-        assert!(store.create("a", "x", vec!["nuke:all".into()], None).is_err());
-        assert!(store.create("a", "x", vec![], None).is_err());
+        assert!(store.create("a", "x", vec!["nuke:all".into()], None, None).is_err());
+        assert!(store.create("a", "x", vec![], None, None).is_err());
+    }
+
+    #[test]
+    fn account_allowlist_round_trips_and_enforces() {
+        let (_dir, store) = store();
+        let (record, secret) = store
+            .create(
+                "alice",
+                "scoped-bot",
+                vec!["messages:send".into()],
+                Some(vec!["acc-1".into(), "acc-2".into()]),
+                None,
+            )
+            .unwrap();
+        assert_eq!(record.account_ids.as_deref(), Some(&["acc-1".into(), "acc-2".into()][..]));
+
+        let (_user, identity) = store.authenticate(&secret).expect("valid key");
+        assert!(identity.allows_account("acc-1"));
+        assert!(identity.allows_account("acc-2"));
+        assert!(!identity.allows_account("acc-3"));
+
+        // An empty allowlist normalises to "all accounts".
+        let (record, _) = store
+            .create("alice", "open-bot", vec!["messages:send".into()], Some(vec![]), None)
+            .unwrap();
+        assert!(record.account_ids.is_none());
     }
 
     #[test]
     fn revoked_key_stops_authenticating() {
         let (_dir, store) = store();
         let (record, secret) = store
-            .create("alice", "bot", vec!["chats:read".into()], None)
+            .create("alice", "bot", vec!["chats:read".into()], None, None)
             .unwrap();
         assert!(store.authenticate(&secret).is_some());
         assert!(store.revoke("alice", &record.id).unwrap());
@@ -250,7 +325,7 @@ mod tests {
     fn expired_key_stops_authenticating() {
         let (_dir, store) = store();
         let (_, secret) = store
-            .create("alice", "bot", vec!["chats:read".into()], Some(0))
+            .create("alice", "bot", vec!["chats:read".into()], None, Some(0))
             .unwrap();
         assert!(store.authenticate(&secret).is_none());
     }
@@ -261,7 +336,7 @@ mod tests {
         let path = dir.path().join("agent-keys.json");
         let secret = {
             let store = AgentKeyStore::open(path.clone()).unwrap();
-            store.create("alice", "bot", vec!["chats:read".into()], None).unwrap().1
+            store.create("alice", "bot", vec!["chats:read".into()], None, None).unwrap().1
         };
         let reopened = AgentKeyStore::open(path).unwrap();
         assert!(reopened.authenticate(&secret).is_some());
