@@ -92,6 +92,119 @@ impl From<LoginResult> for LoginPayload {
     }
 }
 
+// --- Call output types (mirror the REST/Tauri JSON, camelCase fields) ---------
+
+use vasya_core::telegram::call_state::{CallInfoResponse, CallState};
+use vasya_core::telegram::group_call_state::{
+    GroupCallInfoResponse, GroupCallParticipant, GroupCallState,
+};
+
+fn call_state_str(s: &CallState) -> &'static str {
+    match s {
+        CallState::Requesting => "requesting",
+        CallState::Waiting => "waiting",
+        CallState::Ringing => "ringing",
+        CallState::Accepted => "accepted",
+        CallState::Active => "active",
+        CallState::Discarded => "discarded",
+        CallState::Error => "error",
+    }
+}
+
+fn group_call_state_str(s: &GroupCallState) -> &'static str {
+    match s {
+        GroupCallState::Idle => "idle",
+        GroupCallState::Creating => "creating",
+        GroupCallState::Joining => "joining",
+        GroupCallState::Active => "active",
+        GroupCallState::Leaving => "leaving",
+    }
+}
+
+/// 1:1 call signaling/state (`state` matches the REST `state` string).
+#[derive(SimpleObject)]
+pub struct GqlCallInfo {
+    pub call_id: i64,
+    pub access_hash: i64,
+    pub peer_user_id: i64,
+    pub is_outgoing: bool,
+    pub is_video: bool,
+    pub state: String,
+}
+
+impl From<CallInfoResponse> for GqlCallInfo {
+    fn from(c: CallInfoResponse) -> Self {
+        Self {
+            call_id: c.call_id,
+            access_hash: c.access_hash,
+            peer_user_id: c.peer_user_id,
+            is_outgoing: c.is_outgoing,
+            is_video: c.is_video,
+            state: call_state_str(&c.state).into(),
+        }
+    }
+}
+
+/// Group call signaling/state.
+#[derive(SimpleObject)]
+pub struct GqlGroupCallInfo {
+    pub call_id: i64,
+    pub access_hash: i64,
+    pub chat_id: i64,
+    pub state: String,
+    pub title: Option<String>,
+    pub participants_count: i32,
+    pub can_start_video: bool,
+}
+
+impl From<GroupCallInfoResponse> for GqlGroupCallInfo {
+    fn from(g: GroupCallInfoResponse) -> Self {
+        Self {
+            call_id: g.call_id,
+            access_hash: g.access_hash,
+            chat_id: g.chat_id,
+            state: group_call_state_str(&g.state).into(),
+            title: g.title,
+            participants_count: g.participants_count,
+            can_start_video: g.can_start_video,
+        }
+    }
+}
+
+/// One participant of a group call (mirrors the REST JSON).
+#[derive(SimpleObject)]
+pub struct GqlGroupCallParticipant {
+    pub user_id: i64,
+    pub name: Option<String>,
+    pub is_muted: bool,
+    pub is_self: bool,
+    pub is_speaking: bool,
+    pub volume: Option<i32>,
+    pub can_self_unmute: bool,
+    pub video_joined: bool,
+    pub about: Option<String>,
+    pub raise_hand_rating: Option<i64>,
+    pub source: i32,
+}
+
+impl From<GroupCallParticipant> for GqlGroupCallParticipant {
+    fn from(p: GroupCallParticipant) -> Self {
+        Self {
+            user_id: p.user_id,
+            name: p.name,
+            is_muted: p.is_muted,
+            is_self: p.is_self,
+            is_speaking: p.is_speaking,
+            volume: p.volume,
+            can_self_unmute: p.can_self_unmute,
+            video_joined: p.video_joined,
+            about: p.about,
+            raise_hand_rating: p.raise_hand_rating,
+            source: p.source,
+        }
+    }
+}
+
 /// A realtime event: original Tauri-compatible name + unchanged payload.
 #[derive(SimpleObject, Clone)]
 pub struct EventPayload {
@@ -222,6 +335,22 @@ impl QueryRoot {
     async fn tabs(&self, ctx: &Context<'_>, account_id: String) -> Result<Vec<TabRecord>> {
         let (sctx, user) = (server_ctx(ctx), auth_user(ctx)?);
         Ok(routes::folders::get_tabs_op(sctx, user, &account_id).await?)
+    }
+
+    /// Participants of a group call (signaling/state only).
+    async fn group_call_participants(
+        &self,
+        ctx: &Context<'_>,
+        account_id: String,
+        call_id: i64,
+        access_hash: i64,
+    ) -> Result<Vec<GqlGroupCallParticipant>> {
+        let (sctx, user) = (server_ctx(ctx), auth_user(ctx)?);
+        let parts = routes::calls::group_call_participants_op(
+            sctx, user, &account_id, call_id, access_hash,
+        )
+        .await?;
+        Ok(parts.into_iter().map(Into::into).collect())
     }
 }
 
@@ -405,6 +534,119 @@ impl MutationRoot {
     ) -> Result<bool> {
         let (sctx, user) = (server_ctx(ctx), auth_user(ctx)?);
         routes::folders::save_tabs_op(sctx, user, &account_id, tabs).await?;
+        Ok(true)
+    }
+
+    // --- 1:1 calls: signaling/control/state (audio stays client-side) -----------
+
+    /// Start an outgoing 1:1 call (DH exchange + `phone.requestCall`).
+    async fn request_call(
+        &self,
+        ctx: &Context<'_>,
+        account_id: String,
+        user_id: i64,
+        #[graphql(default = false)] is_video: bool,
+    ) -> Result<GqlCallInfo> {
+        let (sctx, user) = (server_ctx(ctx), auth_user(ctx)?);
+        Ok(routes::calls::request_call_op(sctx, user, &account_id, user_id, is_video)
+            .await?
+            .into())
+    }
+
+    /// Accept an incoming 1:1 call (`phone.acceptCall`).
+    async fn accept_call(
+        &self,
+        ctx: &Context<'_>,
+        account_id: String,
+        call_id: i64,
+    ) -> Result<GqlCallInfo> {
+        let (sctx, user) = (server_ctx(ctx), auth_user(ctx)?);
+        Ok(routes::calls::accept_call_op(sctx, user, &account_id, call_id).await?.into())
+    }
+
+    /// Confirm a 1:1 call after exchanging DH values (`phone.confirmCall`).
+    async fn confirm_call(
+        &self,
+        ctx: &Context<'_>,
+        account_id: String,
+        call_id: i64,
+        g_b: Vec<u8>,
+    ) -> Result<GqlCallInfo> {
+        let (sctx, user) = (server_ctx(ctx), auth_user(ctx)?);
+        Ok(routes::calls::confirm_call_op(sctx, user, &account_id, call_id, g_b).await?.into())
+    }
+
+    /// End a 1:1 call (`phone.discardCall`). `reason`: hangup | missed |
+    /// disconnect | busy (default hangup).
+    async fn discard_call(
+        &self,
+        ctx: &Context<'_>,
+        account_id: String,
+        call_id: i64,
+        reason: Option<String>,
+    ) -> Result<bool> {
+        let (sctx, user) = (server_ctx(ctx), auth_user(ctx)?);
+        let reason = reason.as_deref().unwrap_or("hangup");
+        routes::calls::discard_call_op(sctx, user, &account_id, call_id, reason).await?;
+        Ok(true)
+    }
+
+    // --- Group calls: full MTProto signaling ------------------------------------
+
+    /// Create a group call in a chat (`phone.createGroupCall`).
+    async fn create_group_call(
+        &self,
+        ctx: &Context<'_>,
+        account_id: String,
+        chat_id: i64,
+        title: Option<String>,
+    ) -> Result<GqlGroupCallInfo> {
+        let (sctx, user) = (server_ctx(ctx), auth_user(ctx)?);
+        Ok(routes::calls::create_group_call_op(sctx, user, &account_id, chat_id, title)
+            .await?
+            .into())
+    }
+
+    /// Join a group call (`phone.joinGroupCall`).
+    async fn join_group_call(
+        &self,
+        ctx: &Context<'_>,
+        account_id: String,
+        call_id: i64,
+        access_hash: i64,
+        chat_id: i64,
+        #[graphql(default = false)] muted: bool,
+    ) -> Result<GqlGroupCallInfo> {
+        let (sctx, user) = (server_ctx(ctx), auth_user(ctx)?);
+        Ok(routes::calls::join_group_call_op(
+            sctx, user, &account_id, call_id, access_hash, chat_id, muted,
+        )
+        .await?
+        .into())
+    }
+
+    /// Leave a group call (`phone.leaveGroupCall`).
+    async fn leave_group_call(
+        &self,
+        ctx: &Context<'_>,
+        account_id: String,
+        call_id: i64,
+    ) -> Result<bool> {
+        let (sctx, user) = (server_ctx(ctx), auth_user(ctx)?);
+        routes::calls::leave_group_call_op(sctx, user, &account_id, call_id).await?;
+        Ok(true)
+    }
+
+    /// Mute/unmute self in a group call (`phone.editGroupCallParticipant`).
+    async fn toggle_group_call_mute(
+        &self,
+        ctx: &Context<'_>,
+        account_id: String,
+        call_id: i64,
+        muted: bool,
+    ) -> Result<bool> {
+        let (sctx, user) = (server_ctx(ctx), auth_user(ctx)?);
+        routes::calls::toggle_group_call_mute_op(sctx, user, &account_id, call_id, muted).await?;
         Ok(true)
     }
 }
@@ -616,6 +858,26 @@ mod tests {
         let (_dir, _ctx, schema) = test_schema();
         let sdl = schema.sdl();
         for field in ["messageReceived", "messageEdited", "chatUpdated", "callEvent", "sttProgress"] {
+            assert!(sdl.contains(field), "SDL is missing {field}");
+        }
+    }
+
+    #[tokio::test]
+    async fn sdl_lists_call_signaling() {
+        let (_dir, _ctx, schema) = test_schema();
+        let sdl = schema.sdl();
+        // Mutations + query parity with the REST /calls and /group-calls routes.
+        for field in [
+            "requestCall",
+            "acceptCall",
+            "confirmCall",
+            "discardCall",
+            "createGroupCall",
+            "joinGroupCall",
+            "leaveGroupCall",
+            "toggleGroupCallMute",
+            "groupCallParticipants",
+        ] {
             assert!(sdl.contains(field), "SDL is missing {field}");
         }
     }

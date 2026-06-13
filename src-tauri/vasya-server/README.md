@@ -26,7 +26,30 @@ Anti-flood: token bucket per account on mutating routes (burst 10, 1 token/2s,
 with `Retry-After`. Agent keys get a second, stricter per-key bucket
 (burst 5, 1 token/5s, `ServerOptions.agent_rate_limit`).
 
-Phase-2 stubs (501): 1:1 calls, group calls, STT, storage-mode.
+Voice calls (1:1 + group): the **signaling / control / state** surface is
+live over REST and GraphQL — both transports call the same `*_op` functions,
+which delegate to the shared `vasya_core::telegram::{calls, group_calls}`
+engine that the desktop Tauri commands also use.
+
+- 1:1: `POST /accounts/{acc}/calls/{request,accept,confirm,discard}` —
+  DH key exchange + `phone.requestCall`/`acceptCall`/`confirmCall`/`discardCall`.
+- Group: `POST /accounts/{acc}/group-calls`, `…/join`, `…/leave`, `…/mute`,
+  `GET …/group-calls/participants` — full MTProto signaling
+  (`phone.createGroupCall`/`joinGroupCall`/`leaveGroupCall`/`editGroupCallParticipant`/`getGroupParticipants`).
+- Call state changes (`telegram:incoming-call`, `telegram:call-*`,
+  `telegram:group-call-*`) flow through the same event bus to `/events` (SSE)
+  and the `callEvent` / `groupCallEvent` GraphQL subscriptions.
+
+**Headless-audio caveat:** a server has no microphone or speaker, so real-time
+call *audio* (capture/playback) cannot run here — that is a client-side
+concern, handled by the desktop VoIP sidecar. The two audio-only 1:1
+endpoints, `POST /accounts/{acc}/calls/{volume,mute}`, therefore return a
+documented **501** explaining audio is client-side. Group-call *mute* is a
+real MTProto signal (`editGroupCallParticipant`), so it is fully implemented
+on the server.
+
+Remaining Phase-2 stubs (501): STT (Whisper, desktop-only) and the
+app-specific storage-mode toggle.
 
 ## Agent-native layer
 
@@ -134,8 +157,15 @@ for i in $(seq 1 12); do curl -s -o /dev/null -w '%{http_code} ' -X POST -H "$TO
   -H 'content-type: application/json' -d '{"text":"spam '$i'"}' \
   $BASE/accounts/$ACC/chats/<chat_id>/messages; done; echo
 
-# 8. Stubs report 501
-curl -s -o /dev/null -w '%{http_code}\n' -X POST -H "$TOK" $BASE/accounts/$ACC/calls/request
+# 8. Voice call signaling (state only; audio stays on the client)
+curl -s -X POST -H "$TOK" -H 'content-type: application/json' \
+  -d '{"userId":123456789,"isVideo":false}' $BASE/accounts/$ACC/calls/request
+# Audio-only endpoints document a 501 (call audio is client-side):
+curl -s -o /dev/null -w '%{http_code}\n' -X POST -H "$TOK" \
+  -H 'content-type: application/json' -d '{"callId":1,"muted":true}' \
+  $BASE/accounts/$ACC/calls/mute   # -> 501
+# Remaining 501 stubs: STT + storage-mode
+curl -s -o /dev/null -w '%{http_code}\n' -H "$TOK" $BASE/stt/models   # -> 501
 
 # 9. Restart the server: sessions reload from disk (encrypted with
 #    SESSION_MASTER_KEY), GET /accounts shows the account again.
@@ -148,7 +178,7 @@ Endpoints (same bearer auth as REST for HTTP; WS authenticates on
 
 | Route | What |
 |---|---|
-| `POST /api/v1/graphql` | queries + mutations (REST parity: accounts, chats, messages, search, topics, folders/tabs, telegram login) |
+| `POST /api/v1/graphql` | queries + mutations (REST parity: accounts, chats, messages, search, topics, folders/tabs, telegram login, voice-call signaling) |
 | `GET /api/v1/graphql/ws` | subscriptions, `graphql-transport-ws` + legacy `graphql-ws` protocols |
 | `GET /api/v1/graphql/sdl` | schema SDL (public, like /openapi.json) |
 | `GET /api/v1/graphql/playground` | dev playground — only with `VASYA_GRAPHQL_PLAYGROUND=1` |
