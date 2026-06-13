@@ -95,9 +95,9 @@ fn save_settings(app: &AppHandle, settings: &SttSettings) -> Result<(), String> 
 
 #[tauri::command]
 pub async fn get_stt_settings(app: AppHandle) -> Result<SttSettings, String> {
-    // Never expose the compile-time Deepgram key to the webview/renderer.
-    // Transcription falls back to the compiled-in key inside `transcribe_deepgram`,
-    // so STT keeps working even though the key is not returned here.
+    // The Deepgram key is a per-user secret: it is read from the persisted
+    // settings only (no key is embedded in the build) and is required for the
+    // Deepgram provider — `transcribe_deepgram` errors if it is missing.
     let settings = load_settings(&app);
     Ok(settings)
 }
@@ -188,26 +188,11 @@ pub async fn transcribe_audio(
 }
 
 // --- Deepgram provider ---
-
-#[derive(Deserialize)]
-struct DeepgramResponse {
-    results: Option<DeepgramResults>,
-}
-
-#[derive(Deserialize)]
-struct DeepgramResults {
-    channels: Vec<DeepgramChannel>,
-}
-
-#[derive(Deserialize)]
-struct DeepgramChannel {
-    alternatives: Vec<DeepgramAlternative>,
-}
-
-#[derive(Deserialize)]
-struct DeepgramAlternative {
-    transcript: String,
-}
+//
+// The Deepgram call + content-type sniffing live in `vasya_core::stt` so the
+// desktop app and the server share one implementation. This wrapper keeps the
+// command's file-based contract (read the audio off disk, return a
+// `TranscriptionResult`).
 
 async fn transcribe_deepgram(
     _app: &AppHandle,
@@ -224,56 +209,12 @@ async fn transcribe_deepgram(
         .await
         .map_err(|e| format!("Failed to read audio file: {}", e))?;
 
-    // Detect content type from file magic bytes (not extension — voice files may have wrong ext)
-    let content_type = if audio_data.starts_with(b"OggS") {
-        "audio/ogg"
-    } else if audio_data.len() >= 3 && &audio_data[..3] == b"ID3" {
-        "audio/mpeg"
-    } else if audio_data.len() >= 4 && &audio_data[..4] == b"RIFF" {
-        "audio/wav"
-    } else if audio_data.len() >= 2 && audio_data[0] == 0xFF && (audio_data[1] & 0xE0) == 0xE0 {
-        "audio/mpeg"
-    } else {
-        "audio/ogg" // Telegram voice messages default
-    };
-
-    let lang = &settings.language;
-    let url = format!(
-        "https://api.deepgram.com/v1/listen?model=nova-2&language={}&smart_format=true&punctuate=true",
-        lang
-    );
-
-    let client = reqwest::Client::new();
-    let response = client
-        .post(&url)
-        .header("Authorization", format!("Token {}", api_key))
-        .header("Content-Type", content_type)
-        .body(audio_data)
-        .send()
-        .await
-        .map_err(|e| format!("Deepgram request failed: {}", e))?;
-
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        return Err(format!("Deepgram API error {}: {}", status, body));
-    }
-
-    let resp: DeepgramResponse = response
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse Deepgram response: {}", e))?;
-
-    let text = resp
-        .results
-        .and_then(|r| r.channels.into_iter().next())
-        .and_then(|c| c.alternatives.into_iter().next())
-        .map(|a| a.transcript)
-        .unwrap_or_default();
+    let transcript =
+        vasya_core::stt::transcribe_deepgram(&api_key, audio_data, &settings.language).await?;
 
     Ok(TranscriptionResult {
-        text,
-        language: Some(lang.clone()),
+        text: transcript.text,
+        language: transcript.language,
         cached: false,
     })
 }
