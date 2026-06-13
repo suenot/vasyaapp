@@ -1,6 +1,6 @@
 {
   "name": "vasya-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "MCP server exposing the vasya-api Telegram session host as agent tools",
   "type": "module",
   "bin": { "vasya-mcp": "dist/index.js" },

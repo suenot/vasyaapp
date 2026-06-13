@@ -489,6 +489,144 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn split_destructive_scopes_enforced() {
+        let (_dir, app) = test_app("tok");
+
+        // A key with login + chat-create but NOT the new destructive scopes
+        // can no longer log out an account or delete a chat.
+        let (_id, secret) =
+            create_agent_key(&app, &["telegram:login", "chats:write"]).await;
+
+        let forbidden = |method: &'static str, path: &'static str, want_scope: &'static str| {
+            let app = app.clone();
+            let secret = secret.clone();
+            async move {
+                let res = app
+                    .oneshot(
+                        Request::builder()
+                            .method(method)
+                            .uri(path)
+                            .header("Authorization", format!("Bearer {secret}"))
+                            .header("content-type", "application/json")
+                            .body(Body::from("{}"))
+                            .unwrap(),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(res.status(), StatusCode::FORBIDDEN, "{method} {path}");
+                assert!(
+                    body_json(res).await["error"].as_str().unwrap().contains(want_scope),
+                    "{method} {path} should name {want_scope}"
+                );
+            }
+        };
+
+        // DELETE account now needs accounts:delete, not telegram:login.
+        forbidden("DELETE", "/api/v1/accounts/a1", "accounts:delete").await;
+        // DELETE chat now needs chats:delete, not chats:write.
+        forbidden("DELETE", "/api/v1/accounts/a1/chats/5", "chats:delete").await;
+        // Forward now needs messages:forward, not messages:send.
+        let (_id, send_only) = create_agent_key(&app, &["messages:send"]).await;
+        let res = app
+            .clone()
+            .oneshot(
+                Request::post("/api/v1/accounts/a1/messages/forward")
+                    .header("Authorization", format!("Bearer {send_only}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from("{}"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+        assert!(body_json(res).await["error"]
+            .as_str()
+            .unwrap()
+            .contains("messages:forward"));
+
+        // A key that DOES hold the destructive scope clears the scope gate
+        // (it then fails later for the missing account, never with a scope error).
+        let (_id, deleter) = create_agent_key(&app, &["accounts:delete"]).await;
+        let res = app
+            .oneshot(
+                Request::delete("/api/v1/accounts/a1")
+                    .header("Authorization", format!("Bearer {deleter}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = res.status();
+        if status == StatusCode::FORBIDDEN {
+            let err = body_json(res).await["error"].as_str().unwrap().to_string();
+            assert!(!err.contains("scope"), "scope gate should pass, got: {err}");
+        }
+    }
+
+    #[tokio::test]
+    async fn per_account_allowlist_enforced() {
+        let (_dir, app) = test_app("tok");
+
+        // Create a key restricted to a single account via the allowlist.
+        let body = serde_json::json!({
+            "name": "scoped-bot",
+            "scopes": ["chats:read"],
+            "accountIds": ["acc-allowed"],
+        })
+        .to_string();
+        let res = app
+            .clone()
+            .oneshot(
+                Request::post("/api/v1/agent-keys")
+                    .header("Authorization", "Bearer tok")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let json = body_json(res).await;
+        assert_eq!(
+            json["accountIds"].as_array().unwrap()[0].as_str().unwrap(),
+            "acc-allowed"
+        );
+        let secret = json["secret"].as_str().unwrap().to_string();
+
+        // A non-listed account is rejected with the allowlist error.
+        let res = app
+            .clone()
+            .oneshot(
+                Request::get("/api/v1/accounts/acc-other/chats")
+                    .header("Authorization", format!("Bearer {secret}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+        assert!(body_json(res).await["error"]
+            .as_str()
+            .unwrap()
+            .contains("allowlist"));
+
+        // The listed account clears the allowlist gate (no allowlist error).
+        let res = app
+            .oneshot(
+                Request::get("/api/v1/accounts/acc-allowed/chats")
+                    .header("Authorization", format!("Bearer {secret}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        if res.status() == StatusCode::FORBIDDEN {
+            let err = body_json(res).await["error"].as_str().unwrap().to_string();
+            assert!(!err.contains("allowlist"), "listed account blocked: {err}");
+        }
+    }
+
+    #[tokio::test]
     async fn revoked_agent_key_is_unauthorized() {
         let (_dir, app) = test_app("tok");
         let (id, secret) = create_agent_key(&app, &["accounts:read"]).await;

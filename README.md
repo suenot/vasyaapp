@@ -18,7 +18,7 @@ The engine (`vasya-core`) is fronted by **`vasya-server`** — an API gateway yo
 
 - **REST** (`/api/v1`, ~46 routes) + **GraphQL** (queries, mutations, **WS subscriptions**) + **SSE** event stream (`/api/v1/events`) + an **OpenAPI** spec.
 - **Agent-native**: scoped API keys (`vk_…`) with a per-key permission scope, an **audit log**, and **idempotency-key** replay — safe to give an autonomous agent.
-- **MCP server** (`vasya-mcp/`): wraps the REST API as **13 Model Context Protocol tools**, so an LLM can list chats, read/send messages, manage accounts, etc. Configure with `VASYA_API_URL` + `VASYA_AGENT_KEY`.
+- **MCP server** (`vasya-mcp/`): wraps the REST API as **29 Model Context Protocol tools** at REST parity, so an LLM can run the login flow, manage accounts, create/delete chats, send & download media, edit folders/tabs, search and read/send messages — the full messenger. Configure with `VASYA_API_URL` + `VASYA_AGENT_KEY`.
 
 ## 🧩 Deployment modes (self-hostable, no lock-in)
 
