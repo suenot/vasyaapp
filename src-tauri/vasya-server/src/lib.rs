@@ -228,10 +228,11 @@ mod tests {
 
     #[tokio::test]
     async fn stubs_return_501() {
+        // STT + storage-mode remain desktop-only stubs.
         let (_dir, app) = test_app("tok");
         let res = app
             .oneshot(
-                Request::post("/api/v1/accounts/a1/calls/request")
+                Request::get("/api/v1/stt/models")
                     .header("Authorization", "Bearer tok")
                     .body(Body::empty())
                     .unwrap(),
@@ -239,6 +240,77 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(res.status(), StatusCode::NOT_IMPLEMENTED);
+    }
+
+    /// 1:1 call audio (mute/volume) is client-side only → documented 501 with
+    /// an explanation, even though call *signaling* is implemented.
+    #[tokio::test]
+    async fn call_audio_endpoints_document_501() {
+        let (_dir, app) = test_app("tok");
+        for path in ["/api/v1/accounts/a1/calls/mute", "/api/v1/accounts/a1/calls/volume"] {
+            let res = app
+                .clone()
+                .oneshot(
+                    Request::post(path)
+                        .header("Authorization", "Bearer tok")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(res.status(), StatusCode::NOT_IMPLEMENTED, "{path}");
+            let body = body_json(res).await;
+            assert!(
+                body["error"].as_str().unwrap().contains("client-side"),
+                "expected client-side audio explanation, got {body}"
+            );
+        }
+    }
+
+    /// Call *signaling* routes are implemented (no longer 501): with a valid
+    /// body but no live client for the account they resolve to 404, proving
+    /// the request reached the handler instead of a stub.
+    #[tokio::test]
+    async fn call_signaling_routes_are_implemented() {
+        let (_dir, app) = test_app("tok");
+        let cases = [
+            ("/api/v1/accounts/a1/calls/request", r#"{"userId":42,"isVideo":false}"#),
+            ("/api/v1/accounts/a1/group-calls", r#"{"chatId":42}"#),
+        ];
+        for (path, json) in cases {
+            let res = app
+                .clone()
+                .oneshot(
+                    Request::post(path)
+                        .header("Authorization", "Bearer tok")
+                        .header("content-type", "application/json")
+                        .body(Body::from(json))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(res.status(), StatusCode::NOT_FOUND, "{path}");
+            assert_ne!(res.status(), StatusCode::NOT_IMPLEMENTED, "{path}");
+        }
+    }
+
+    /// The audit/policy layer maps every /calls/* and /group-calls/* path to
+    /// the `calls:use` scope (see policy.rs) — here we assert OpenAPI advertises
+    /// the call surface as live (op-style) rather than as 501 stubs.
+    #[tokio::test]
+    async fn openapi_advertises_call_signaling() {
+        let (_dir, app) = test_app("tok");
+        let res = app
+            .oneshot(Request::get("/api/v1/openapi.json").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let doc = body_json(res).await;
+        let request = &doc["paths"]["/api/v1/accounts/{acc}/calls/request"]["post"];
+        assert!(request["responses"]["200"].is_object(), "calls/request should be 200/live");
+        assert!(request["responses"]["501"].is_null());
+        // Audio-only endpoints stay documented 501.
+        let mute = &doc["paths"]["/api/v1/accounts/{acc}/calls/mute"]["post"];
+        assert!(mute["responses"]["501"].is_object(), "calls/mute stays 501");
     }
 
     #[tokio::test]

@@ -42,8 +42,8 @@ pub struct ServerContext {
     /// as the Tauri AppState fields.
     pub pending_logins: Mutex<HashMap<String, grammers_client::types::LoginToken>>,
     pub pending_passwords: Mutex<HashMap<String, grammers_client::types::PasswordToken>>,
-    /// Call registries required by the update pump; the call API itself is
-    /// 501 in this phase.
+    /// Call registries shared by the update pump and the call API
+    /// (`routes::calls`): the same state the desktop app keeps in AppState.
     pub active_calls: Arc<RwLock<ActiveCalls>>,
     pub active_group_calls: Arc<RwLock<ActiveGroupCalls>>,
     /// Server-side media/avatar cache directory.

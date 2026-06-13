@@ -2,7 +2,8 @@
 //!
 //! Pathing convention (plan §4.2): /api/v1, accounts scoped as
 //! /accounts/{acc}/..., raw bodies for media upload, bytes out for media
-//! download. Calls, group calls, STT and storage-mode are 501 this phase.
+//! download. Voice calls (1:1 + group) are implemented in `calls`; only STT,
+//! storage-mode and real-time call audio remain 501.
 
 use std::sync::Arc;
 
@@ -16,6 +17,7 @@ use crate::error::ApiError;
 
 pub mod accounts;
 pub mod agent_keys;
+pub mod calls;
 pub mod chats;
 pub mod events;
 pub mod folders;
@@ -98,6 +100,20 @@ pub fn api_router(ctx: Arc<ServerContext>) -> Router {
         .route("/accounts/{acc}/folders/{folder_id}", delete(folders::delete_folder))
         .route("/accounts/{acc}/tabs", get(folders::get_tabs))
         .route("/accounts/{acc}/tabs", put(folders::save_tabs))
+        // 1:1 voice calls — signaling/control/state (audio stays client-side).
+        // volume/mute drive the desktop VoIP sidecar → documented 501 here.
+        .route("/accounts/{acc}/calls/request", post(calls::request_call))
+        .route("/accounts/{acc}/calls/accept", post(calls::accept_call))
+        .route("/accounts/{acc}/calls/confirm", post(calls::confirm_call))
+        .route("/accounts/{acc}/calls/discard", post(calls::discard_call))
+        .route("/accounts/{acc}/calls/volume", post(calls::call_audio_unavailable))
+        .route("/accounts/{acc}/calls/mute", post(calls::call_audio_unavailable))
+        // Group calls — full MTProto signaling (create/join/leave/mute/participants)
+        .route("/accounts/{acc}/group-calls", post(calls::create_group_call))
+        .route("/accounts/{acc}/group-calls/join", post(calls::join_group_call))
+        .route("/accounts/{acc}/group-calls/leave", post(calls::leave_group_call))
+        .route("/accounts/{acc}/group-calls/mute", post(calls::toggle_group_call_mute))
+        .route("/accounts/{acc}/group-calls/participants", get(calls::group_call_participants))
         // Realtime bus as SSE (same bus feeds the GraphQL subscriptions)
         .route("/events", get(events::sse_events))
         // Agent key management + audit (human sessions only — the agent
@@ -107,7 +123,7 @@ pub fn api_router(ctx: Arc<ServerContext>) -> Router {
         .route("/agent-keys/scopes", get(agent_keys::list_scopes))
         .route("/agent-keys/{key_id}", delete(agent_keys::revoke_key))
         .route("/audit", get(agent_keys::read_audit))
-        // 501 stubs: calls, group calls, STT, storage-mode
+        // 501 stubs: STT, storage-mode (desktop-only engines)
         .merge(stubs::router())
         // Layer order (inner→outer as added): idempotency → agent policy →
         // audit → auth. Audit records policy rejections and replays.

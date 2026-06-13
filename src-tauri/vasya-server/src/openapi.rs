@@ -19,6 +19,17 @@ fn stub_op(summary: &str, tag: &str) -> serde_json::Value {
     })
 }
 
+/// Audio-only 1:1 endpoints that a headless server cannot serve: real-time
+/// mute/volume drive the desktop VoIP sidecar. Documented 501 (signaling and
+/// state are available via the other /calls/* routes).
+fn audio_stub_op(summary: &str) -> serde_json::Value {
+    serde_json::json!({
+        "summary": format!("{summary} (501: call audio is client-side only)"),
+        "tags": ["calls"],
+        "responses": { "501": { "description": "Audio capture/playback runs on the client (VoIP sidecar), not the server" } }
+    })
+}
+
 pub async fn openapi_json() -> Json<serde_json::Value> {
     let paths = serde_json::json!({
         "/api/v1/health": { "get": { "summary": "Health check (no auth)", "tags": ["meta"],
@@ -113,17 +124,17 @@ pub async fn openapi_json() -> Json<serde_json::Value> {
             "put": op("Replace UI tabs", "folders")
         },
 
-        "/api/v1/accounts/{acc}/calls/request": { "post": stub_op("Request a 1:1 call", "calls") },
-        "/api/v1/accounts/{acc}/calls/accept": { "post": stub_op("Accept a call", "calls") },
-        "/api/v1/accounts/{acc}/calls/confirm": { "post": stub_op("Confirm a call", "calls") },
-        "/api/v1/accounts/{acc}/calls/discard": { "post": stub_op("Discard a call", "calls") },
-        "/api/v1/accounts/{acc}/calls/volume": { "post": stub_op("Set call volume", "calls") },
-        "/api/v1/accounts/{acc}/calls/mute": { "post": stub_op("Toggle call mute", "calls") },
-        "/api/v1/accounts/{acc}/group-calls": { "post": stub_op("Create a group call", "calls") },
-        "/api/v1/accounts/{acc}/group-calls/join": { "post": stub_op("Join a group call", "calls") },
-        "/api/v1/accounts/{acc}/group-calls/leave": { "post": stub_op("Leave a group call", "calls") },
-        "/api/v1/accounts/{acc}/group-calls/participants": { "get": stub_op("Group call participants", "calls") },
-        "/api/v1/accounts/{acc}/group-calls/mute": { "post": stub_op("Toggle group call mute", "calls") },
+        "/api/v1/accounts/{acc}/calls/request": { "post": op("Request a 1:1 call {userId, isVideo?} — signaling only (DH + phone.requestCall)", "calls") },
+        "/api/v1/accounts/{acc}/calls/accept": { "post": op("Accept an incoming 1:1 call {callId}", "calls") },
+        "/api/v1/accounts/{acc}/calls/confirm": { "post": op("Confirm a 1:1 call after DH exchange {callId, gB}", "calls") },
+        "/api/v1/accounts/{acc}/calls/discard": { "post": op("Discard a 1:1 call {callId, reason?} (204)", "calls") },
+        "/api/v1/accounts/{acc}/calls/volume": { "post": audio_stub_op("Set 1:1 call volume") },
+        "/api/v1/accounts/{acc}/calls/mute": { "post": audio_stub_op("Toggle 1:1 call mute") },
+        "/api/v1/accounts/{acc}/group-calls": { "post": op("Create a group call {chatId, title?}", "calls") },
+        "/api/v1/accounts/{acc}/group-calls/join": { "post": op("Join a group call {callId, accessHash, chatId, muted?}", "calls") },
+        "/api/v1/accounts/{acc}/group-calls/leave": { "post": op("Leave a group call {callId} (204)", "calls") },
+        "/api/v1/accounts/{acc}/group-calls/participants": { "get": op("List group call participants; query: callId, accessHash", "calls") },
+        "/api/v1/accounts/{acc}/group-calls/mute": { "post": op("Mute/unmute self in a group call {callId, muted} (204)", "calls") },
         "/api/v1/stt/settings": { "get": stub_op("STT settings", "stt"), "put": stub_op("Update STT settings", "stt") },
         "/api/v1/stt/transcribe": { "post": stub_op("Transcribe audio", "stt") },
         "/api/v1/stt/models/download": { "post": stub_op("Download a Whisper model", "stt") },
