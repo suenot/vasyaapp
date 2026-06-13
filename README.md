@@ -12,6 +12,25 @@ The same UI also runs in the browser against a remote **`vasya-server`** (the Te
 - **Build:** `VITE_VASYA_API_URL=https://your-api.example.com npm run build` → serve `dist/`.
 - The engine transport is abstracted (`src/transport/`): Tauri IPC on desktop, HTTP/SSE in the browser. The production stack (vasya-server + sync backend + Caddy) lives in `backend/deploy/` — see its README to deploy your own.
 
+## 🤖 API-managed & agent-native
+
+The engine (`vasya-core`) is fronted by **`vasya-server`** — an API gateway you can drive programmatically or hand to AI agents:
+
+- **REST** (`/api/v1`, ~46 routes) + **GraphQL** (queries, mutations, **WS subscriptions**) + **SSE** event stream (`/api/v1/events`) + an **OpenAPI** spec.
+- **Agent-native**: scoped API keys (`vk_…`) with a per-key permission scope, an **audit log**, and **idempotency-key** replay — safe to give an autonomous agent.
+- **MCP server** (`vasya-mcp/`): wraps the REST API as **13 Model Context Protocol tools**, so an LLM can list chats, read/send messages, manage accounts, etc. Configure with `VASYA_API_URL` + `VASYA_AGENT_KEY`.
+
+## 🧩 Deployment modes (self-hostable, no lock-in)
+
+Same UI, four ways to run the engine — pick per use case:
+
+1. **Embedded** (default desktop) — the Telegram engine runs in-process via Tauri IPC. No server, no backend.
+2. **Embedded + local API** — the desktop app mounts the API server on `127.0.0.1` (Settings → General → *Local API server*, token-auth). Lets local AI agents / MCP talk to your running app — **no separate backend needed**.
+3. **Remote / web** — the browser UI talks to a remote `vasya-server`.
+4. **Remote / desktop** — the desktop app points at a remote `vasya-server` instead of its embedded engine.
+
+Run `vasya-server` standalone or alongside the sync backend (`backend/deploy/`). Everything is self-hostable — bring your own server, domain, and secrets.
+
 ## ✨ Features
 
 - **Messaging UX**: Telegram-style date separators, rich link previews, and message grouping
