@@ -32,12 +32,13 @@ fn required_scope(method: &Method, segments: &[&str]) -> Option<&'static str> {
         ["events"] => Some("events:read"),
         ["telegram", ..] => Some("telegram:login"),
         ["accounts"] => Some("accounts:read"),
-        // logout deletes the session — same trust level as login
-        ["accounts", _] => Some("telegram:login"),
+        // logout/delete the account — its own high-blast-radius scope,
+        // no longer bundled with login.
+        ["accounts", _] => Some("accounts:delete"), // DELETE
         ["accounts", _, "avatar"] => Some("accounts:read"),
         ["accounts", _, "chats", "load"] => Some("chats:read"),
         ["accounts", _, "chats"] => Some("chats:read"),
-        ["accounts", _, "chats", _] => Some("chats:write"), // DELETE
+        ["accounts", _, "chats", _] => Some("chats:delete"), // DELETE
         ["accounts", _, "groups"] | ["accounts", _, "channels"] => Some("chats:write"),
         ["accounts", _, "contacts"] => Some("chats:read"),
         ["accounts", _, "chats", _, "photo"] => Some("chats:read"),
@@ -48,7 +49,7 @@ fn required_scope(method: &Method, segments: &[&str]) -> Option<&'static str> {
         }
         ["accounts", _, "chats", _, "messages", _, "media"] => Some("messages:read"),
         ["accounts", _, "chats", _, "media"] => Some("messages:send"),
-        ["accounts", _, "messages", "forward"] => Some("messages:send"),
+        ["accounts", _, "messages", "forward"] => Some("messages:forward"),
         ["accounts", _, "chats", _, "read"] => Some("messages:send"),
         ["accounts", _, "search"] => Some("chats:read"),
         ["accounts", _, "messages", "search"] => Some("messages:read"),
@@ -104,6 +105,15 @@ pub async fn agent_policy(
         .ok_or_else(|| ApiError::Forbidden("No agent scope covers this endpoint".into()))?;
     if !agent.has_scope(scope) {
         return Err(ApiError::Forbidden(format!("Missing scope: {scope}")));
+    }
+
+    // Per-account allowlist: for any /accounts/{acc}/… target, the key must
+    // be allowed to reach {acc}. Keys without an allowlist reach all of the
+    // owner's accounts (unchanged behavior).
+    if let ["accounts", acc, ..] = segments.as_slice() {
+        if !agent.allows_account(acc) {
+            return Err(ApiError::Forbidden("account not in key allowlist".into()));
+        }
     }
 
     // Stricter quota for agent mutations (plan §12), per key, on top of
@@ -240,16 +250,16 @@ mod tests {
     fn scope_map_covers_the_surface() {
         let cases: &[(&str, &str, Option<&str>)] = &[
             ("GET", "/api/v1/accounts", Some("accounts:read")),
-            ("DELETE", "/api/v1/accounts/a1", Some("telegram:login")),
+            ("DELETE", "/api/v1/accounts/a1", Some("accounts:delete")),
             ("POST", "/api/v1/telegram/login/code", Some("telegram:login")),
             ("GET", "/api/v1/accounts/a1/chats", Some("chats:read")),
             ("POST", "/api/v1/accounts/a1/chats/load", Some("chats:read")),
-            ("DELETE", "/api/v1/accounts/a1/chats/5", Some("chats:write")),
+            ("DELETE", "/api/v1/accounts/a1/chats/5", Some("chats:delete")),
             ("POST", "/api/v1/accounts/a1/groups", Some("chats:write")),
             ("GET", "/api/v1/accounts/a1/chats/5/messages", Some("messages:read")),
             ("POST", "/api/v1/accounts/a1/chats/5/messages", Some("messages:send")),
             ("POST", "/api/v1/accounts/a1/chats/5/media", Some("messages:send")),
-            ("POST", "/api/v1/accounts/a1/messages/forward", Some("messages:send")),
+            ("POST", "/api/v1/accounts/a1/messages/forward", Some("messages:forward")),
             ("POST", "/api/v1/accounts/a1/chats/5/read", Some("messages:send")),
             ("GET", "/api/v1/accounts/a1/chats/5/messages/9/media", Some("messages:read")),
             ("GET", "/api/v1/accounts/a1/chats/5/messages/search", Some("messages:read")),

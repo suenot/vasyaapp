@@ -34,11 +34,13 @@ pub async fn openapi_json() -> Json<serde_json::Value> {
                         "name": { "type": "string" },
                         "scopes": { "type": "array", "items": { "type": "string" },
                             "description": "see GET /agent-keys/scopes" },
+                        "accountIds": { "type": "array", "items": { "type": "string" }, "nullable": true,
+                            "description": "optional per-account allowlist; omitted/empty = all of the owner's accounts" },
                         "ttlSecs": { "type": "integer", "nullable": true } },
                     "required": ["name", "scopes"] } } } },
-                "responses": { "200": { "description": "{id, name, scopes, createdAt, expiresAt, secret}" } } }
+                "responses": { "200": { "description": "{id, name, scopes, accountIds, createdAt, expiresAt, secret}" } } }
         },
-        "/api/v1/agent-keys/scopes": { "get": op("Valid scope names for agent keys", "agent-keys") },
+        "/api/v1/agent-keys/scopes": { "get": op("Valid scopes for agent keys, each with a one-line description ({scope, description})", "agent-keys") },
         "/api/v1/agent-keys/{key_id}": { "delete": op("Revoke an agent key", "agent-keys") },
         "/api/v1/audit": { "get": op("Recent audit entries for mutating calls (?limit=, human sessions only)", "agent-keys") },
 

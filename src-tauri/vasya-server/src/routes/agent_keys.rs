@@ -8,7 +8,7 @@ use axum::http::StatusCode;
 use axum::{Extension, Json};
 use serde::{Deserialize, Serialize};
 
-use crate::agent_keys::ALL_SCOPES;
+use crate::agent_keys::SCOPE_DESCRIPTIONS;
 use crate::audit::AuditEntry;
 use crate::auth::UserId;
 use crate::context::ServerContext;
@@ -19,6 +19,10 @@ use crate::error::ApiError;
 pub struct CreateKeyRequest {
     pub name: String,
     pub scopes: Vec<String>,
+    /// Optional per-account allowlist. Omitted/empty = all of the owner's
+    /// accounts; non-empty = only these account UUIDs are reachable.
+    #[serde(default)]
+    pub account_ids: Option<Vec<String>>,
     /// Optional TTL in seconds.
     pub ttl_secs: Option<u64>,
 }
@@ -29,6 +33,7 @@ pub struct CreatedKeyResponse {
     pub id: String,
     pub name: String,
     pub scopes: Vec<String>,
+    pub account_ids: Option<Vec<String>>,
     pub created_at: i64,
     pub expires_at: Option<i64>,
     /// Shown exactly once — only a hash is stored.
@@ -41,9 +46,17 @@ pub struct KeySummary {
     pub id: String,
     pub name: String,
     pub scopes: Vec<String>,
+    pub account_ids: Option<Vec<String>>,
     pub created_at: i64,
     pub expires_at: Option<i64>,
     pub revoked: bool,
+}
+
+/// A scope name plus a one-line, human-readable description.
+#[derive(Serialize)]
+pub struct ScopeInfo {
+    pub scope: &'static str,
+    pub description: &'static str,
 }
 
 pub async fn create_key(
@@ -53,12 +66,13 @@ pub async fn create_key(
 ) -> Result<Json<CreatedKeyResponse>, ApiError> {
     let (record, secret) = ctx
         .agent_keys
-        .create(&user.0 .0, &req.name, req.scopes, req.ttl_secs)?;
+        .create(&user.0 .0, &req.name, req.scopes, req.account_ids, req.ttl_secs)?;
     tracing::info!(key_id = %record.id, user = %user.0 .0, "Agent key created");
     Ok(Json(CreatedKeyResponse {
         id: record.id,
         name: record.name,
         scopes: record.scopes,
+        account_ids: record.account_ids,
         created_at: record.created_at,
         expires_at: record.expires_at,
         secret,
@@ -77,6 +91,7 @@ pub async fn list_keys(
             id: k.id,
             name: k.name,
             scopes: k.scopes,
+            account_ids: k.account_ids,
             created_at: k.created_at,
             expires_at: k.expires_at,
             revoked: k.revoked,
@@ -98,9 +113,15 @@ pub async fn revoke_key(
     }
 }
 
-/// The valid scope names, for UIs building key-creation forms.
-pub async fn list_scopes() -> Json<Vec<&'static str>> {
-    Json(ALL_SCOPES.to_vec())
+/// The valid scopes with one-line descriptions, for UIs building
+/// key-creation forms.
+pub async fn list_scopes() -> Json<Vec<ScopeInfo>> {
+    Json(
+        SCOPE_DESCRIPTIONS
+            .iter()
+            .map(|(scope, description)| ScopeInfo { scope, description })
+            .collect(),
+    )
 }
 
 #[derive(Deserialize)]
