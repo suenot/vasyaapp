@@ -19,8 +19,9 @@ interface ThemeState {
 export const useThemeStore = create<ThemeState>()(
   persist(
     (set) => ({
-      themeSetting: 'system',
-      effectiveTheme: 'light',
+      // Default to the Telegram-style dark-blue theme (not the light/orange one).
+      themeSetting: 'blue',
+      effectiveTheme: 'blue',
 
       setThemeSetting: (setting) => set({ themeSetting: setting }),
       setEffectiveTheme: (theme) => set({ effectiveTheme: theme }),
