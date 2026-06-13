@@ -109,8 +109,10 @@ curl -s -H "$TOK" -H 'content-type: application/json' \
 ```
 
 The `vk_...` secret is a normal bearer token; only a SHA-256 hash is stored.
-Agent keys cannot manage keys, read the audit log, or use GraphQL (REST/MCP
-only this phase).
+Agent keys cannot manage keys or read the audit log. They **can** use GraphQL
+(queries, mutations and WS subscriptions): each resolver enforces the same scope
+the equivalent REST endpoint would require, plus the per-account allowlist (see
+[GraphQL → Agent keys](#agent-keys-over-graphql) below).
 
 Audit: every mutating call (user or agent) is appended to
 `data_dir/audit.log` — `GET /api/v1/audit?limit=` (human only) reads it.
@@ -268,6 +270,28 @@ curl -s -H "$TOK" -H 'content-type: application/json' \
   -d '{"query":"{ accounts { accountId phone connected } }"}' $BASE/graphql
 curl -s -H "$TOK" -H 'content-type: application/json' \
   -d '{"query":"mutation { sendMessage(accountId: \"<uuid>\", chatId: <id>, text: \"via graphql\") { id date } }"}' $BASE/graphql
+```
+
+### Agent keys over GraphQL
+
+A `vk_...` agent key is a valid bearer for `POST /graphql` and for the WS
+`connection_init` payload, exactly like a human token. Because every operation
+shares the single `/graphql` path, scope enforcement happens **inside each
+resolver** rather than in the path-based policy middleware: a resolver requires
+the same scope its REST twin does (`sendMessage` → `messages:send`, `chats` →
+`chats:read`, the `messageReceived`/`messageEdited`/… subscriptions →
+`events:read`, etc.), and `/accounts/{acc}/…`-style fields also check the key's
+per-account allowlist. The resolver↔REST scope map is cross-checked by the
+`graphql_scopes_mirror_rest` test so the two transports can't drift apart.
+
+Missing scope or allowlist violations come back as a normal GraphQL error
+(HTTP 200, `errors[]`, `extensions.code = "FORBIDDEN"`); for a subscription the
+error is the first — and only — item the stream yields before it closes.
+
+```sh
+# scope present → data; scope absent → {"errors":[{"message":"Missing scope: chats:read", ...}]}
+curl -s -H "Authorization: Bearer vk_..." -H 'content-type: application/json' \
+  -d '{"query":"{ chats(accountId: \"<uuid>\") { id title } }"}' $BASE/graphql
 ```
 
 ## Embedding in the desktop app (task #8 sketch)

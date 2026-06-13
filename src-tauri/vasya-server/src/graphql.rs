@@ -16,6 +16,7 @@ use async_graphql::{
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::{Stream, StreamExt};
 
+use crate::agent_keys::AgentIdentity;
 use crate::auth::UserId;
 use crate::context::ServerContext;
 use crate::dto::{
@@ -46,6 +47,41 @@ fn server_ctx<'a>(ctx: &Context<'a>) -> &'a Arc<ServerContext> {
 fn auth_user<'a>(ctx: &Context<'a>) -> Result<&'a UserId> {
     ctx.data::<UserId>()
         .map_err(|_| Error::new("Unauthorized").extend_with(|_, ext| ext.set("code", "UNAUTHORIZED")))
+}
+
+fn forbidden(message: impl Into<String>) -> Error {
+    Error::new(message.into()).extend_with(|_, ext| ext.set("code", "FORBIDDEN"))
+}
+
+/// Authenticate the caller and enforce the agent scope (and, when given, the
+/// per-account allowlist) this resolver requires.
+///
+/// GraphQL routes everything through one `/graphql` path, so the REST
+/// path-based scope gate in `policy.rs` can't apply here — enforcement lives
+/// in the resolver instead. `scope` is the exact same string the analogous
+/// REST endpoint maps to via [`crate::policy::required_scope`] (cross-checked
+/// in tests, so the two transports can't drift). Human sessions carry no
+/// [`AgentIdentity`] and hold every scope implicitly, so they pass straight
+/// through — matching `policy.rs`, which skips callers without an identity.
+fn authorize<'a>(
+    ctx: &Context<'a>,
+    scope: &str,
+    account_id: Option<&str>,
+) -> Result<&'a UserId> {
+    let user = auth_user(ctx)?;
+    if let Some(agent) = ctx.data_opt::<AgentIdentity>() {
+        if !agent.has_scope(scope) {
+            return Err(forbidden(format!("Missing scope: {scope}")));
+        }
+        // Per-account allowlist mirrors REST: only enforced for ops that
+        // actually target a specific account (account_id = Some).
+        if let Some(acc) = account_id {
+            if !agent.allows_account(acc) {
+                return Err(forbidden("account not in key allowlist"));
+            }
+        }
+    }
+    Ok(user)
 }
 
 // --- Output types specific to GraphQL ------------------------------------------
@@ -220,14 +256,14 @@ pub struct QueryRoot;
 impl QueryRoot {
     /// The caller's telegram accounts.
     async fn accounts(&self, ctx: &Context<'_>) -> Result<Vec<AccountSummary>> {
-        let (sctx, user) = (server_ctx(ctx), auth_user(ctx)?);
+        let (sctx, user) = (server_ctx(ctx), authorize(ctx, "accounts:read", None)?);
         Ok(routes::accounts::list_accounts_op(sctx, user).await)
     }
 
     /// Whether Telegram api_id/api_hash are configured.
     async fn credentials_configured(&self, ctx: &Context<'_>) -> Result<bool> {
         let sctx = server_ctx(ctx);
-        auth_user(ctx)?;
+        authorize(ctx, "telegram:login", None)?;
         Ok(sctx.manager.api_id() != 0 && !sctx.manager.api_hash().is_empty())
     }
 
@@ -238,13 +274,15 @@ impl QueryRoot {
         account_id: String,
         #[graphql(default = false)] live: bool,
     ) -> Result<Vec<Chat>> {
-        let (sctx, user) = (server_ctx(ctx), auth_user(ctx)?);
+        let (sctx, user) =
+            (server_ctx(ctx), authorize(ctx, "chats:read", Some(&account_id))?);
         Ok(routes::chats::list_chats_op(sctx, user, &account_id, live).await?)
     }
 
     /// User-type chats (contacts).
     async fn contacts(&self, ctx: &Context<'_>, account_id: String) -> Result<Vec<Chat>> {
-        let (sctx, user) = (server_ctx(ctx), auth_user(ctx)?);
+        let (sctx, user) =
+            (server_ctx(ctx), authorize(ctx, "chats:read", Some(&account_id))?);
         Ok(routes::chats::get_contacts_op(sctx, user, &account_id).await?)
     }
 
@@ -258,7 +296,8 @@ impl QueryRoot {
         limit: Option<i32>,
         topic_id: Option<i32>,
     ) -> Result<Vec<Message>> {
-        let (sctx, user) = (server_ctx(ctx), auth_user(ctx)?);
+        let (sctx, user) =
+            (server_ctx(ctx), authorize(ctx, "messages:read", Some(&account_id))?);
         Ok(routes::messages::get_messages_op(
             sctx,
             user,
@@ -280,7 +319,8 @@ impl QueryRoot {
         q: String,
         limit: Option<i32>,
     ) -> Result<Vec<Message>> {
-        let (sctx, user) = (server_ctx(ctx), auth_user(ctx)?);
+        let (sctx, user) =
+            (server_ctx(ctx), authorize(ctx, "messages:read", Some(&account_id))?);
         Ok(routes::messages::search_messages_op(
             sctx,
             user,
@@ -300,7 +340,8 @@ impl QueryRoot {
         q: String,
         limit: Option<i32>,
     ) -> Result<Vec<GlobalSearchResult>> {
-        let (sctx, user) = (server_ctx(ctx), auth_user(ctx)?);
+        let (sctx, user) =
+            (server_ctx(ctx), authorize(ctx, "chats:read", Some(&account_id))?);
         Ok(routes::search::global_search_op(sctx, user, &account_id, &q, limit).await?)
     }
 
@@ -312,7 +353,8 @@ impl QueryRoot {
         q: String,
         limit: Option<i32>,
     ) -> Result<Vec<GlobalMessageResult>> {
-        let (sctx, user) = (server_ctx(ctx), auth_user(ctx)?);
+        let (sctx, user) =
+            (server_ctx(ctx), authorize(ctx, "messages:read", Some(&account_id))?);
         Ok(routes::search::search_all_messages_op(sctx, user, &account_id, &q, limit).await?)
     }
 
@@ -323,17 +365,20 @@ impl QueryRoot {
         account_id: String,
         chat_id: i64,
     ) -> Result<Vec<ForumTopic>> {
-        let (sctx, user) = (server_ctx(ctx), auth_user(ctx)?);
+        let (sctx, user) =
+            (server_ctx(ctx), authorize(ctx, "chats:read", Some(&account_id))?);
         Ok(routes::topics::get_forum_topics_op(sctx, user, &account_id, chat_id).await?)
     }
 
     async fn folders(&self, ctx: &Context<'_>, account_id: String) -> Result<Vec<FolderRecord>> {
-        let (sctx, user) = (server_ctx(ctx), auth_user(ctx)?);
+        let (sctx, user) =
+            (server_ctx(ctx), authorize(ctx, "folders:read", Some(&account_id))?);
         Ok(routes::folders::get_folders_op(sctx, user, &account_id).await?)
     }
 
     async fn tabs(&self, ctx: &Context<'_>, account_id: String) -> Result<Vec<TabRecord>> {
-        let (sctx, user) = (server_ctx(ctx), auth_user(ctx)?);
+        let (sctx, user) =
+            (server_ctx(ctx), authorize(ctx, "folders:read", Some(&account_id))?);
         Ok(routes::folders::get_tabs_op(sctx, user, &account_id).await?)
     }
 
@@ -345,7 +390,8 @@ impl QueryRoot {
         call_id: i64,
         access_hash: i64,
     ) -> Result<Vec<GqlGroupCallParticipant>> {
-        let (sctx, user) = (server_ctx(ctx), auth_user(ctx)?);
+        let (sctx, user) =
+            (server_ctx(ctx), authorize(ctx, "calls:use", Some(&account_id))?);
         let parts = routes::calls::group_call_participants_op(
             sctx, user, &account_id, call_id, access_hash,
         )
@@ -366,7 +412,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         phone: String,
     ) -> Result<LoginCodeResponse> {
-        let (sctx, user) = (server_ctx(ctx), auth_user(ctx)?);
+        let (sctx, user) = (server_ctx(ctx), authorize(ctx, "telegram:login", None)?);
         Ok(routes::telegram_auth::request_login_code_op(sctx, user, phone).await?)
     }
 
@@ -377,7 +423,7 @@ impl MutationRoot {
         account_id: String,
         code: String,
     ) -> Result<LoginPayload> {
-        let (sctx, user) = (server_ctx(ctx), auth_user(ctx)?);
+        let (sctx, user) = (server_ctx(ctx), authorize(ctx, "telegram:login", None)?);
         Ok(routes::telegram_auth::verify_code_op(sctx, user, account_id, code).await?.into())
     }
 
@@ -388,7 +434,7 @@ impl MutationRoot {
         account_id: String,
         password: String,
     ) -> Result<LoginPayload> {
-        let (sctx, user) = (server_ctx(ctx), auth_user(ctx)?);
+        let (sctx, user) = (server_ctx(ctx), authorize(ctx, "telegram:login", None)?);
         let user_info =
             routes::telegram_auth::check_password_op(sctx, user, account_id, password).await?;
         Ok(LoginPayload { status: "authorized".into(), user: Some(user_info.into()) })
@@ -396,7 +442,8 @@ impl MutationRoot {
 
     /// Disconnect and delete an account session.
     async fn logout(&self, ctx: &Context<'_>, account_id: String) -> Result<bool> {
-        let (sctx, user) = (server_ctx(ctx), auth_user(ctx)?);
+        let (sctx, user) =
+            (server_ctx(ctx), authorize(ctx, "accounts:delete", Some(&account_id))?);
         routes::accounts::logout_op(sctx, user, &account_id).await?;
         Ok(true)
     }
@@ -409,7 +456,7 @@ impl MutationRoot {
         api_hash: String,
     ) -> Result<bool> {
         let sctx = server_ctx(ctx);
-        auth_user(ctx)?;
+        authorize(ctx, "telegram:login", None)?;
         sctx.manager.update_credentials(api_id, api_hash);
         Ok(true)
     }
@@ -422,7 +469,8 @@ impl MutationRoot {
         text: String,
         topic_id: Option<i32>,
     ) -> Result<Message> {
-        let (sctx, user) = (server_ctx(ctx), auth_user(ctx)?);
+        let (sctx, user) =
+            (server_ctx(ctx), authorize(ctx, "messages:send", Some(&account_id))?);
         Ok(routes::messages::send_message_op(sctx, user, &account_id, chat_id, text, topic_id)
             .await?)
     }
@@ -435,7 +483,8 @@ impl MutationRoot {
         to_chat_id: i64,
         message_ids: Vec<i32>,
     ) -> Result<Vec<Option<i32>>> {
-        let (sctx, user) = (server_ctx(ctx), auth_user(ctx)?);
+        let (sctx, user) =
+            (server_ctx(ctx), authorize(ctx, "messages:forward", Some(&account_id))?);
         Ok(routes::messages::forward_messages_op(
             sctx,
             user,
@@ -454,7 +503,8 @@ impl MutationRoot {
         chat_id: i64,
         max_id: i32,
     ) -> Result<bool> {
-        let (sctx, user) = (server_ctx(ctx), auth_user(ctx)?);
+        let (sctx, user) =
+            (server_ctx(ctx), authorize(ctx, "messages:send", Some(&account_id))?);
         routes::messages::mark_messages_read_op(sctx, user, &account_id, chat_id, max_id).await?;
         Ok(true)
     }
@@ -462,7 +512,8 @@ impl MutationRoot {
     /// Kick off progressive chat loading; subscribe to chatUpdated /
     /// chatsLoadingProgress for the results.
     async fn start_loading_chats(&self, ctx: &Context<'_>, account_id: String) -> Result<bool> {
-        let (sctx, user) = (server_ctx(ctx), auth_user(ctx)?);
+        let (sctx, user) =
+            (server_ctx(ctx), authorize(ctx, "chats:read", Some(&account_id))?);
         routes::chats::start_loading_chats_op(sctx, user, &account_id).await?;
         Ok(true)
     }
@@ -473,7 +524,8 @@ impl MutationRoot {
         account_id: String,
         chat_id: i64,
     ) -> Result<bool> {
-        let (sctx, user) = (server_ctx(ctx), auth_user(ctx)?);
+        let (sctx, user) =
+            (server_ctx(ctx), authorize(ctx, "chats:delete", Some(&account_id))?);
         routes::chats::delete_and_leave_chat_op(sctx, user, &account_id, chat_id).await?;
         Ok(true)
     }
@@ -486,7 +538,8 @@ impl MutationRoot {
         title: String,
         user_ids: Vec<i64>,
     ) -> Result<i64> {
-        let (sctx, user) = (server_ctx(ctx), auth_user(ctx)?);
+        let (sctx, user) =
+            (server_ctx(ctx), authorize(ctx, "chats:write", Some(&account_id))?);
         Ok(routes::chats::create_group_op(sctx, user, &account_id, title, &user_ids).await?)
     }
 
@@ -499,7 +552,8 @@ impl MutationRoot {
         #[graphql(default)] about: String,
         #[graphql(default = false)] is_megagroup: bool,
     ) -> Result<i64> {
-        let (sctx, user) = (server_ctx(ctx), auth_user(ctx)?);
+        let (sctx, user) =
+            (server_ctx(ctx), authorize(ctx, "chats:write", Some(&account_id))?);
         Ok(routes::chats::create_channel_op(sctx, user, &account_id, title, about, is_megagroup)
             .await?)
     }
@@ -510,7 +564,8 @@ impl MutationRoot {
         account_id: String,
         folder: FolderRecord,
     ) -> Result<bool> {
-        let (sctx, user) = (server_ctx(ctx), auth_user(ctx)?);
+        let (sctx, user) =
+            (server_ctx(ctx), authorize(ctx, "folders:write", Some(&account_id))?);
         routes::folders::save_folder_op(sctx, user, &account_id, folder).await?;
         Ok(true)
     }
@@ -521,7 +576,8 @@ impl MutationRoot {
         account_id: String,
         id: String,
     ) -> Result<bool> {
-        let (sctx, user) = (server_ctx(ctx), auth_user(ctx)?);
+        let (sctx, user) =
+            (server_ctx(ctx), authorize(ctx, "folders:write", Some(&account_id))?);
         routes::folders::delete_folder_op(sctx, user, &account_id, &id).await?;
         Ok(true)
     }
@@ -532,7 +588,8 @@ impl MutationRoot {
         account_id: String,
         tabs: Vec<TabRecord>,
     ) -> Result<bool> {
-        let (sctx, user) = (server_ctx(ctx), auth_user(ctx)?);
+        let (sctx, user) =
+            (server_ctx(ctx), authorize(ctx, "folders:write", Some(&account_id))?);
         routes::folders::save_tabs_op(sctx, user, &account_id, tabs).await?;
         Ok(true)
     }
@@ -547,7 +604,8 @@ impl MutationRoot {
         user_id: i64,
         #[graphql(default = false)] is_video: bool,
     ) -> Result<GqlCallInfo> {
-        let (sctx, user) = (server_ctx(ctx), auth_user(ctx)?);
+        let (sctx, user) =
+            (server_ctx(ctx), authorize(ctx, "calls:use", Some(&account_id))?);
         Ok(routes::calls::request_call_op(sctx, user, &account_id, user_id, is_video)
             .await?
             .into())
@@ -560,7 +618,8 @@ impl MutationRoot {
         account_id: String,
         call_id: i64,
     ) -> Result<GqlCallInfo> {
-        let (sctx, user) = (server_ctx(ctx), auth_user(ctx)?);
+        let (sctx, user) =
+            (server_ctx(ctx), authorize(ctx, "calls:use", Some(&account_id))?);
         Ok(routes::calls::accept_call_op(sctx, user, &account_id, call_id).await?.into())
     }
 
@@ -572,7 +631,8 @@ impl MutationRoot {
         call_id: i64,
         g_b: Vec<u8>,
     ) -> Result<GqlCallInfo> {
-        let (sctx, user) = (server_ctx(ctx), auth_user(ctx)?);
+        let (sctx, user) =
+            (server_ctx(ctx), authorize(ctx, "calls:use", Some(&account_id))?);
         Ok(routes::calls::confirm_call_op(sctx, user, &account_id, call_id, g_b).await?.into())
     }
 
@@ -585,7 +645,8 @@ impl MutationRoot {
         call_id: i64,
         reason: Option<String>,
     ) -> Result<bool> {
-        let (sctx, user) = (server_ctx(ctx), auth_user(ctx)?);
+        let (sctx, user) =
+            (server_ctx(ctx), authorize(ctx, "calls:use", Some(&account_id))?);
         let reason = reason.as_deref().unwrap_or("hangup");
         routes::calls::discard_call_op(sctx, user, &account_id, call_id, reason).await?;
         Ok(true)
@@ -601,7 +662,8 @@ impl MutationRoot {
         chat_id: i64,
         title: Option<String>,
     ) -> Result<GqlGroupCallInfo> {
-        let (sctx, user) = (server_ctx(ctx), auth_user(ctx)?);
+        let (sctx, user) =
+            (server_ctx(ctx), authorize(ctx, "calls:use", Some(&account_id))?);
         Ok(routes::calls::create_group_call_op(sctx, user, &account_id, chat_id, title)
             .await?
             .into())
@@ -617,7 +679,8 @@ impl MutationRoot {
         chat_id: i64,
         #[graphql(default = false)] muted: bool,
     ) -> Result<GqlGroupCallInfo> {
-        let (sctx, user) = (server_ctx(ctx), auth_user(ctx)?);
+        let (sctx, user) =
+            (server_ctx(ctx), authorize(ctx, "calls:use", Some(&account_id))?);
         Ok(routes::calls::join_group_call_op(
             sctx, user, &account_id, call_id, access_hash, chat_id, muted,
         )
@@ -632,7 +695,8 @@ impl MutationRoot {
         account_id: String,
         call_id: i64,
     ) -> Result<bool> {
-        let (sctx, user) = (server_ctx(ctx), auth_user(ctx)?);
+        let (sctx, user) =
+            (server_ctx(ctx), authorize(ctx, "calls:use", Some(&account_id))?);
         routes::calls::leave_group_call_op(sctx, user, &account_id, call_id).await?;
         Ok(true)
     }
@@ -645,7 +709,8 @@ impl MutationRoot {
         call_id: i64,
         muted: bool,
     ) -> Result<bool> {
-        let (sctx, user) = (server_ctx(ctx), auth_user(ctx)?);
+        let (sctx, user) =
+            (server_ctx(ctx), authorize(ctx, "calls:use", Some(&account_id))?);
         routes::calls::toggle_group_call_mute_op(sctx, user, &account_id, call_id, muted).await?;
         Ok(true)
     }
@@ -664,7 +729,9 @@ fn event_stream(
     chat_id: Option<i64>,
 ) -> Result<impl Stream<Item = EventPayload>> {
     let sctx = server_ctx(ctx).clone();
-    let user = auth_user(ctx)?;
+    // Subscriptions consume the same realtime bus as SSE `/events`, so they
+    // require the same `events:read` scope (plus the per-account allowlist).
+    let user = authorize(ctx, "events:read", Some(&account_id))?;
 
     // Ownership is checked once at subscribe time; accounts are never
     // re-owned while live (logout releases, but then the stream just goes
@@ -949,5 +1016,137 @@ mod tests {
             .expect("stream ended");
         assert!(!response.errors.is_empty());
         assert!(response.errors[0].message.contains("belongs to another user"));
+    }
+
+    fn agent(scopes: &[&str], account_ids: Option<Vec<String>>) -> AgentIdentity {
+        AgentIdentity {
+            key_id: "test-key".into(),
+            scopes: scopes.iter().map(|s| s.to_string()).collect(),
+            account_ids,
+        }
+    }
+
+    #[tokio::test]
+    async fn agent_query_scope_enforced() {
+        let (_dir, _ctx, schema) = test_schema();
+
+        // Without the accounts:read scope the query is rejected, scope named.
+        let request = async_graphql::Request::new("{ accounts { accountId } }")
+            .data(UserId("local".into()))
+            .data(agent(&[], None));
+        let response = schema.execute(request).await;
+        assert!(
+            response.errors.iter().any(|e| e.message.contains("accounts:read")),
+            "{:?}",
+            response.errors
+        );
+
+        // With the scope it runs (empty account list).
+        let request = async_graphql::Request::new("{ accounts { accountId } }")
+            .data(UserId("local".into()))
+            .data(agent(&["accounts:read"], None));
+        let response = schema.execute(request).await;
+        assert!(response.errors.is_empty(), "{:?}", response.errors);
+    }
+
+    #[tokio::test]
+    async fn agent_subscription_requires_events_scope() {
+        let (_dir, ctx, schema) = test_schema();
+        ctx.accounts.ensure_access("local", "acc-1").unwrap();
+
+        let request = async_graphql::Request::new(
+            r#"subscription { messageReceived(accountId: "acc-1") { event } }"#,
+        )
+        .data(UserId("local".into()))
+        .data(agent(&[], None));
+        let mut stream = schema.execute_stream(request);
+
+        let response = stream.next().await.expect("stream ended");
+        assert!(
+            response.errors.iter().any(|e| e.message.contains("events:read")),
+            "{:?}",
+            response.errors
+        );
+    }
+
+    #[tokio::test]
+    async fn agent_subscription_enforces_account_allowlist() {
+        let (_dir, ctx, schema) = test_schema();
+        ctx.accounts.ensure_access("local", "acc-1").unwrap();
+
+        // Holds events:read but the account is outside the key's allowlist.
+        let request = async_graphql::Request::new(
+            r#"subscription { messageReceived(accountId: "acc-1") { event } }"#,
+        )
+        .data(UserId("local".into()))
+        .data(agent(&["events:read"], Some(vec!["acc-2".into()])));
+        let mut stream = schema.execute_stream(request);
+
+        let response = stream.next().await.expect("stream ended");
+        assert!(
+            response.errors.iter().any(|e| e.message.contains("allowlist")),
+            "{:?}",
+            response.errors
+        );
+    }
+
+    /// The GraphQL resolver scopes must match the REST `required_scope` map
+    /// for the analogous endpoint, so the two transports can't drift apart.
+    #[test]
+    fn graphql_scopes_mirror_rest() {
+        use crate::policy::required_scope;
+        use axum::http::Method;
+        let cases: &[(&str, &str, &str, &[&str])] = &[
+            ("accounts", "accounts:read", "GET", &["accounts"]),
+            ("credentialsConfigured", "telegram:login", "GET", &["telegram", "credentials"]),
+            ("chats", "chats:read", "GET", &["accounts", "a", "chats"]),
+            ("contacts", "chats:read", "GET", &["accounts", "a", "contacts"]),
+            ("messages", "messages:read", "GET", &["accounts", "a", "chats", "5", "messages"]),
+            (
+                "searchMessages",
+                "messages:read",
+                "GET",
+                &["accounts", "a", "chats", "5", "messages", "search"],
+            ),
+            ("globalSearch", "chats:read", "GET", &["accounts", "a", "search"]),
+            (
+                "searchAllMessages",
+                "messages:read",
+                "GET",
+                &["accounts", "a", "messages", "search"],
+            ),
+            ("forumTopics", "chats:read", "GET", &["accounts", "a", "chats", "5", "topics"]),
+            ("folders", "folders:read", "GET", &["accounts", "a", "folders"]),
+            ("tabs", "folders:read", "GET", &["accounts", "a", "tabs"]),
+            (
+                "groupCallParticipants",
+                "calls:use",
+                "GET",
+                &["accounts", "a", "group-calls", "participants"],
+            ),
+            ("requestLoginCode", "telegram:login", "POST", &["telegram", "login", "code"]),
+            ("logout", "accounts:delete", "DELETE", &["accounts", "a"]),
+            ("sendMessage", "messages:send", "POST", &["accounts", "a", "chats", "5", "messages"]),
+            (
+                "forwardMessages",
+                "messages:forward",
+                "POST",
+                &["accounts", "a", "messages", "forward"],
+            ),
+            ("markMessagesRead", "messages:send", "POST", &["accounts", "a", "chats", "5", "read"]),
+            ("startLoadingChats", "chats:read", "POST", &["accounts", "a", "chats", "load"]),
+            ("deleteAndLeaveChat", "chats:delete", "DELETE", &["accounts", "a", "chats", "5"]),
+            ("createGroup", "chats:write", "POST", &["accounts", "a", "groups"]),
+            ("createChannel", "chats:write", "POST", &["accounts", "a", "channels"]),
+            ("saveFolder", "folders:write", "POST", &["accounts", "a", "folders"]),
+            ("saveTabs", "folders:write", "PUT", &["accounts", "a", "tabs"]),
+            ("requestCall", "calls:use", "POST", &["accounts", "a", "calls", "request"]),
+            ("createGroupCall", "calls:use", "POST", &["accounts", "a", "group-calls"]),
+            ("messageReceived", "events:read", "GET", &["events"]),
+        ];
+        for (label, scope, method, segments) in cases {
+            let method: Method = method.parse().unwrap();
+            assert_eq!(required_scope(&method, segments), Some(*scope), "{label}");
+        }
     }
 }

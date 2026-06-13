@@ -465,11 +465,12 @@ mod tests {
             .unwrap()
             .contains("messages:send"));
 
-        // Agents cannot manage keys or use GraphQL.
+        // Agents still cannot manage keys or read the audit log. (GraphQL is
+        // now allowed with per-resolver scope enforcement — see
+        // `graphql_respects_agent_scopes`.)
         for (method, path) in [
             ("GET", "/api/v1/agent-keys"),
             ("GET", "/api/v1/audit"),
-            ("POST", "/api/v1/graphql"),
         ] {
             let res = app
                 .clone()
@@ -485,6 +486,99 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(res.status(), StatusCode::FORBIDDEN, "{method} {path}");
+        }
+    }
+
+    /// POST a GraphQL query with the given bearer; returns the JSON body.
+    /// GraphQL always answers 200 (errors live in the `errors` array).
+    async fn graphql_query(
+        app: &axum::Router,
+        bearer: &str,
+        query: &str,
+    ) -> serde_json::Value {
+        let body = serde_json::json!({ "query": query }).to_string();
+        let res = app
+            .clone()
+            .oneshot(
+                Request::post("/api/v1/graphql")
+                    .header("Authorization", format!("Bearer {bearer}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        body_json(res).await
+    }
+
+    #[tokio::test]
+    async fn graphql_respects_agent_scopes() {
+        let (_dir, app) = test_app("tok");
+        let (_id, reader) = create_agent_key(&app, &["accounts:read"]).await;
+
+        // In-scope query runs: the accounts list resolves (empty here).
+        let json = graphql_query(&app, &reader, "{ accounts { accountId } }").await;
+        assert!(json.get("errors").is_none(), "unexpected errors: {json}");
+        assert_eq!(json["data"]["accounts"], serde_json::json!([]));
+
+        // A query the key lacks the scope for is rejected, naming the scope.
+        let json = graphql_query(&app, &reader, r#"{ chats(accountId: "a1") { id } }"#).await;
+        let msg = json["errors"][0]["message"].as_str().unwrap();
+        assert!(msg.contains("chats:read"), "expected scope error, got: {msg}");
+
+        // A mutation the key lacks the scope for is rejected too.
+        let json = graphql_query(
+            &app,
+            &reader,
+            r#"mutation { sendMessage(accountId: "a1", chatId: 5, text: "hi") { id } }"#,
+        )
+        .await;
+        let msg = json["errors"][0]["message"].as_str().unwrap();
+        assert!(msg.contains("messages:send"), "expected scope error, got: {msg}");
+    }
+
+    #[tokio::test]
+    async fn graphql_respects_agent_account_allowlist() {
+        let (_dir, app) = test_app("tok");
+
+        // A key restricted to acc-allowed holding chats:read.
+        let body = serde_json::json!({
+            "name": "scoped-bot",
+            "scopes": ["chats:read"],
+            "accountIds": ["acc-allowed"],
+        })
+        .to_string();
+        let res = app
+            .clone()
+            .oneshot(
+                Request::post("/api/v1/agent-keys")
+                    .header("Authorization", "Bearer tok")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let secret = body_json(res).await["secret"].as_str().unwrap().to_string();
+
+        // Targeting a non-listed account via GraphQL hits the allowlist gate.
+        let json =
+            graphql_query(&app, &secret, r#"{ chats(accountId: "acc-other") { id } }"#).await;
+        let msg = json["errors"][0]["message"].as_str().unwrap();
+        assert!(msg.contains("allowlist"), "expected allowlist error, got: {msg}");
+
+        // The listed account clears the scope + allowlist gates (it then fails
+        // later for the missing client, never with a scope/allowlist error).
+        let json =
+            graphql_query(&app, &secret, r#"{ chats(accountId: "acc-allowed") { id } }"#).await;
+        if let Some(err) = json.get("errors") {
+            let msg = err[0]["message"].as_str().unwrap();
+            assert!(
+                !msg.contains("scope") && !msg.contains("allowlist"),
+                "listed account blocked by gate: {msg}"
+            );
         }
     }
 

@@ -26,7 +26,11 @@ fn is_mutation(method: &Method) -> bool {
 
 /// Map an endpoint to the agent scope it requires. Human sessions skip
 /// this entirely (they hold all scopes implicitly).
-fn required_scope(method: &Method, segments: &[&str]) -> Option<&'static str> {
+///
+/// `pub(crate)` so the GraphQL layer can derive each resolver's scope from
+/// the very same map (see `graphql.rs`), keeping the two transports from
+/// drifting apart.
+pub(crate) fn required_scope(method: &Method, segments: &[&str]) -> Option<&'static str> {
     let get = *method == Method::GET;
     match segments {
         ["events"] => Some("events:read"),
@@ -88,11 +92,12 @@ pub async fn agent_policy(
     let segments = path_segments(&path);
 
     match segments.first() {
-        Some(&"graphql") => {
-            return Err(ApiError::Forbidden(
-                "Agent keys cannot use GraphQL yet — use the REST API or vasya-mcp".into(),
-            ))
-        }
+        // GraphQL bundles every operation behind one `/graphql` path, so the
+        // path-based scope gate below can't tell which fields a query touches.
+        // Scope + per-account enforcement therefore moves into the resolver
+        // layer (`graphql.rs::authorize`), mirroring this same scope map. The
+        // agent identity is already in the request extensions; let it through.
+        Some(&"graphql") => return Ok(next.run(req).await),
         Some(&"agent-keys") | Some(&"audit") => {
             return Err(ApiError::Forbidden(
                 "Agent keys cannot manage keys or read the audit log".into(),
