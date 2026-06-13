@@ -276,6 +276,15 @@ mod tests {
     }
 
     #[test]
+    fn scope_descriptions_in_sync() {
+        // SCOPE_DESCRIPTIONS is a parallel array to ALL_SCOPES; fail CI if they drift.
+        assert_eq!(ALL_SCOPES.len(), SCOPE_DESCRIPTIONS.len());
+        for (i, scope) in ALL_SCOPES.iter().enumerate() {
+            assert_eq!(*scope, SCOPE_DESCRIPTIONS[i].0, "scope mismatch at index {i}");
+        }
+    }
+
+    #[test]
     fn unknown_or_empty_scopes_rejected() {
         let (_dir, store) = store();
         assert!(store.create("a", "x", vec!["nuke:all".into()], None, None).is_err());

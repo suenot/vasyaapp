@@ -74,9 +74,10 @@ they are never granted implicitly:
 
 ### Per-account allowlist
 
-Pass `accountIds` at creation to restrict a key to specific accounts; any
-`/accounts/{acc}/…` request for an account outside the list gets
-403 `account not in key allowlist`. Omitted/empty = all of the owner's accounts.
+Pass `accountIds` at creation to restrict a key to specific accounts. The
+allowlist is checked **after** the scope gate: a `/accounts/{acc}/…` request that
+clears its required scope but targets an account outside the list gets
+403 `account not in key allowlist`. Omitted/empty = all the owner's accounts.
 
 ```sh
 curl -s -H "$TOK" -H 'content-type: application/json' \
