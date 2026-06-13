@@ -123,3 +123,42 @@ pub struct TabRecord {
     pub visible: bool,
     pub sort_order: i32,
 }
+
+// --- STT (speech-to-text) -----------------------------------------------------
+
+/// STT settings as returned to the caller. The raw Deepgram key is never
+/// included — only whether one is set and a masked preview (last 4 chars).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SttSettingsResponse {
+    /// "deepgram" or "local_whisper".
+    pub provider: String,
+    /// Whether a Deepgram API key is stored for this user.
+    pub deepgram_api_key_set: bool,
+    /// Masked preview of the stored key (e.g. `••••1234`); `None` if unset.
+    pub deepgram_api_key_masked: Option<String>,
+    /// Whisper model name (desktop-only provider); kept for round-tripping.
+    pub whisper_model: String,
+    /// Default transcription language (BCP-47-ish, e.g. "ru", "en").
+    pub language: String,
+}
+
+/// Partial STT settings update (PUT). Only present fields are changed; the
+/// Deepgram key is write-only and never echoed back.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SttSettingsUpdate {
+    pub provider: Option<String>,
+    pub deepgram_api_key: Option<String>,
+    pub whisper_model: Option<String>,
+    pub language: Option<String>,
+}
+
+/// Transcription result: recognized text plus the language used.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscriptionResponse {
+    pub text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+}

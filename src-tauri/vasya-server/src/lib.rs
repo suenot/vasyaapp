@@ -228,7 +228,25 @@ mod tests {
 
     #[tokio::test]
     async fn stubs_return_501() {
-        // STT + storage-mode remain desktop-only stubs.
+        // storage-mode remains a desktop-only stub. (STT is now implemented:
+        // /stt/models returns a structured "unavailable on server" 200, not 501.)
+        let (_dir, app) = test_app("tok");
+        let res = app
+            .oneshot(
+                Request::get("/api/v1/storage-mode")
+                    .header("Authorization", "Bearer tok")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::NOT_IMPLEMENTED);
+    }
+
+    /// STT is implemented on the server (cloud Deepgram). The local-Whisper
+    /// model catalog is reported as unavailable via a structured 200, NOT a 501.
+    #[tokio::test]
+    async fn stt_models_report_unavailable_not_501() {
         let (_dir, app) = test_app("tok");
         let res = app
             .oneshot(
@@ -239,7 +257,9 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(res.status(), StatusCode::NOT_IMPLEMENTED);
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = body_json(res).await;
+        assert_eq!(body["available"], serde_json::json!(false));
     }
 
     /// 1:1 call audio (mute/volume) is client-side only → documented 501 with

@@ -2,8 +2,9 @@
 //!
 //! Pathing convention (plan §4.2): /api/v1, accounts scoped as
 //! /accounts/{acc}/..., raw bodies for media upload, bytes out for media
-//! download. Voice calls (1:1 + group) are implemented in `calls`; only STT,
-//! storage-mode and real-time call audio remain 501.
+//! download. Voice calls (1:1 + group) are implemented in `calls` and STT in
+//! `stt` (cloud Deepgram); only storage-mode and real-time call audio
+//! remain 501.
 
 use std::sync::Arc;
 
@@ -25,6 +26,7 @@ pub mod graphql_http;
 pub mod media;
 pub mod messages;
 pub mod search;
+pub mod stt;
 pub mod stubs;
 pub mod telegram_auth;
 pub mod topics;
@@ -114,6 +116,16 @@ pub fn api_router(ctx: Arc<ServerContext>) -> Router {
         .route("/accounts/{acc}/group-calls/leave", post(calls::leave_group_call))
         .route("/accounts/{acc}/group-calls/mute", post(calls::toggle_group_call_mute))
         .route("/accounts/{acc}/group-calls/participants", get(calls::group_call_participants))
+        // Speech-to-text: per-user settings + transcription (cloud Deepgram on
+        // the server; local Whisper is desktop-only — see routes/stt.rs).
+        .route("/stt/settings", get(stt::get_settings))
+        .route("/stt/settings", put(stt::update_settings))
+        .route(
+            "/stt/transcribe",
+            post(stt::transcribe).layer(DefaultBodyLimit::max(stt::STT_BODY_LIMIT)),
+        )
+        .route("/stt/models", get(stt::get_models))
+        .route("/stt/models/download", post(stt::download_model))
         // Realtime bus as SSE (same bus feeds the GraphQL subscriptions)
         .route("/events", get(events::sse_events))
         // Agent key management + audit (human sessions only — the agent
