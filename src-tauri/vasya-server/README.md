@@ -48,8 +48,43 @@ documented **501** explaining audio is client-side. Group-call *mute* is a
 real MTProto signal (`editGroupCallParticipant`), so it is fully implemented
 on the server.
 
-Remaining Phase-2 stubs (501): STT (Whisper, desktop-only) and the
-app-specific storage-mode toggle.
+Remaining Phase-2 stub (501): the app-specific storage-mode toggle.
+
+## Speech-to-text (STT)
+
+Voice-message transcription is implemented on the server (scope `stt:use`):
+
+| Provider | Where | Notes |
+| --- | --- | --- |
+| **Deepgram** (cloud, Nova-2) | **Server + desktop** | Bring-your-own-key. The per-user key is stored masked and **never** logged or returned in full. This is the server default. |
+| **Local Whisper** (`whisper.cpp`) | **Desktop only** | Depends on the `stt-sidecar` binary that is excluded from the server image. Selecting it on the server returns a clear `400` ("local Whisper is desktop-only; use the Deepgram provider"). |
+
+```sh
+# Per-user settings (GET masks the key, never echoes it raw)
+curl -s -H "$TOK" $BASE/stt/settings
+# -> {"provider":"deepgram","deepgramApiKeySet":false,"deepgramApiKeyMasked":null,"whisperModel":"base","language":"en"}
+
+# Set the Deepgram key + provider (key is write-only; "" clears it)
+curl -s -X PUT -H "$TOK" -H 'content-type: application/json' \
+  -d '{"provider":"deepgram","deepgramApiKey":"<your-deepgram-key>","language":"en"}' \
+  $BASE/stt/settings
+# GET now shows: "deepgramApiKeySet":true,"deepgramApiKeyMasked":"••••cdef"
+
+# Transcribe raw audio (upload the bytes directly)
+curl -s -X POST -H "$TOK" -H 'content-type: application/octet-stream' \
+  -H 'x-language: en' --data-binary @voice.ogg $BASE/stt/transcribe
+# -> {"text":"hello world","language":"en"}
+
+# …or transcribe a voice message already in a chat (fetched via the engine)
+curl -s -X POST -H "$TOK" -H 'content-type: application/json' \
+  -d '{"accountId":"a1","chatId":12345,"messageId":678}' \
+  $BASE/stt/transcribe
+# -> {"text":"...","language":"en"}
+
+# Local-Whisper model catalog is reported as unavailable on the server (200, not 501)
+curl -s -H "$TOK" $BASE/stt/models
+# -> {"available":false,"reason":"local Whisper is desktop-only ...","models":[...]}
+```
 
 ## Agent-native layer
 
@@ -205,8 +240,13 @@ curl -s -X POST -H "$TOK" -H 'content-type: application/json' \
 curl -s -o /dev/null -w '%{http_code}\n' -X POST -H "$TOK" \
   -H 'content-type: application/json' -d '{"callId":1,"muted":true}' \
   $BASE/accounts/$ACC/calls/mute   # -> 501
-# Remaining 501 stubs: STT + storage-mode
-curl -s -o /dev/null -w '%{http_code}\n' -H "$TOK" $BASE/stt/models   # -> 501
+# 8b. Speech-to-text (cloud Deepgram; see the STT section above)
+curl -s -X PUT -H "$TOK" -H 'content-type: application/json' \
+  -d '{"deepgramApiKey":"<your-deepgram-key>"}' $BASE/stt/settings
+curl -s -X POST -H "$TOK" -H 'content-type: application/octet-stream' \
+  --data-binary @voice.ogg $BASE/stt/transcribe   # -> {"text":...}
+# Remaining 501 stub: storage-mode
+curl -s -o /dev/null -w '%{http_code}\n' -H "$TOK" $BASE/storage-mode   # -> 501
 
 # 9. Restart the server: sessions reload from disk (encrypted with
 #    SESSION_MASTER_KEY), GET /accounts shows the account again.
