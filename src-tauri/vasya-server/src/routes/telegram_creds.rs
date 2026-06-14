@@ -55,12 +55,32 @@ async fn save_user_creds(
     user: &str,
     creds: &StoredTgCreds,
 ) -> Result<(), ApiError> {
-    let path = creds_path(ctx, user);
-    if let Some(parent) = path.parent() {
-        tokio::fs::create_dir_all(parent).await.map_err(ApiError::internal)?;
-    }
     let raw = serde_json::to_vec_pretty(creds).map_err(ApiError::internal)?;
-    tokio::fs::write(&path, raw).await.map_err(ApiError::internal)
+    write_private_file(&creds_path(ctx, user), &raw).await
+}
+
+/// Write a secret file owner-only: parent dir `0700`, file `0600` (Unix), via a
+/// temp file + atomic rename so the api_hash is never briefly world-readable.
+async fn write_private_file(path: &std::path::Path, bytes: &[u8]) -> Result<(), ApiError> {
+    if let Some(parent) = path.parent() {
+        let mut b = tokio::fs::DirBuilder::new();
+        b.recursive(true);
+        #[cfg(unix)]
+        b.mode(0o700);
+        b.create(parent).await.map_err(ApiError::internal)?;
+    }
+    let tmp = path.with_extension("json.tmp");
+    {
+        let mut opts = tokio::fs::OpenOptions::new();
+        opts.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        opts.mode(0o600);
+        let mut f = opts.open(&tmp).await.map_err(ApiError::internal)?;
+        use tokio::io::AsyncWriteExt;
+        f.write_all(bytes).await.map_err(ApiError::internal)?;
+        f.flush().await.map_err(ApiError::internal)?;
+    }
+    tokio::fs::rename(&tmp, path).await.map_err(ApiError::internal)
 }
 
 async fn clear_user_creds(ctx: &ServerContext, user: &str) -> Result<(), ApiError> {
@@ -221,6 +241,22 @@ mod tests {
     fn masks_hash_tail_only() {
         assert_eq!(mask_hash("0123456789abcdef"), "••••cdef");
         assert!(!mask_hash("0123456789abcdef").contains("0123"));
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn secret_file_written_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("telegram-creds").join("u1").join("creds.json");
+        write_private_file(&path, b"{\"apiId\":1}").await.unwrap();
+        let fmode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(fmode, 0o600, "creds file must be owner-only");
+        let dmode =
+            std::fs::metadata(path.parent().unwrap()).unwrap().permissions().mode() & 0o777;
+        assert_eq!(dmode, 0o700, "creds dir must be owner-only");
+        // No temp file left behind.
+        assert!(!path.with_extension("json.tmp").exists());
     }
 
     #[test]
