@@ -159,9 +159,7 @@ pub(crate) async fn update_settings_op(
         settings.provider = SttProvider::parse(provider)?;
     }
     if let Some(language) = update.language {
-        if language.trim().is_empty() || language.len() > 16 {
-            return Err(ApiError::BadRequest("Invalid language code".into()));
-        }
+        validate_language(&language)?;
         settings.language = language;
     }
     if let Some(model) = update.whisper_model {
@@ -201,11 +199,28 @@ pub struct TranscribeRef {
 
 /// Run the configured provider over the given audio bytes. Local Whisper is
 /// desktop-only on the server, so it returns a clear error here.
+/// Validate a transcription language tag before it is interpolated into the
+/// Deepgram request URL (`?language=…`). BCP-47-ish: ASCII letters/digits and
+/// hyphen, length 1..=16. Blocks query-parameter injection via the per-request
+/// override or the persisted setting.
+fn validate_language(lang: &str) -> Result<(), ApiError> {
+    let ok = (1..=16).contains(&lang.len())
+        && lang.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-');
+    if ok {
+        Ok(())
+    } else {
+        Err(ApiError::BadRequest(
+            "Invalid language code (expected BCP-47-ish, e.g. 'en', 'ru', 'pt-BR')".into(),
+        ))
+    }
+}
+
 async fn run_transcription(
     settings: &StoredSttSettings,
     audio: Vec<u8>,
     language: &str,
 ) -> Result<TranscriptionResponse, ApiError> {
+    validate_language(language)?;
     match settings.provider {
         SttProvider::Deepgram => {
             let api_key = settings
@@ -448,6 +463,20 @@ mod tests {
             SttProvider::LocalWhisper
         );
         assert!(SttProvider::parse("bogus").is_err());
+    }
+
+    #[test]
+    fn language_validation_blocks_url_injection() {
+        // Valid BCP-47-ish tags.
+        assert!(validate_language("en").is_ok());
+        assert!(validate_language("ru").is_ok());
+        assert!(validate_language("pt-BR").is_ok());
+        // Injection / malformed values rejected (would alter the Deepgram URL).
+        assert!(validate_language("ru&tier=enhanced").is_err());
+        assert!(validate_language("en&model=evil").is_err());
+        assert!(validate_language("en ").is_err());
+        assert!(validate_language("").is_err());
+        assert!(validate_language(&"a".repeat(17)).is_err());
     }
 
     #[tokio::test]

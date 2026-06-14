@@ -32,6 +32,13 @@ pub type VasyaSchema = Schema<QueryRoot, MutationRoot, SubscriptionRoot>;
 pub fn build_schema(ctx: Arc<ServerContext>) -> VasyaSchema {
     Schema::build(QueryRoot, MutationRoot, SubscriptionRoot)
         .data(ctx)
+        // DoS guards: async-graphql applies no depth/complexity limit by
+        // default, so a deeply nested or highly-aliased query (reachable by any
+        // authenticated caller, incl. a low-priv agent key — `/graphql` is let
+        // through the policy gate) could amplify parser/resolver cost. These
+        // bounds are generous for the real schema (shallow, flat resolvers).
+        .limit_depth(20)
+        .limit_complexity(500)
         .finish()
 }
 
