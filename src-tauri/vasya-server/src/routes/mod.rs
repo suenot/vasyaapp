@@ -2,9 +2,9 @@
 //!
 //! Pathing convention (plan §4.2): /api/v1, accounts scoped as
 //! /accounts/{acc}/..., raw bodies for media upload, bytes out for media
-//! download. Voice calls (1:1 + group) are implemented in `calls` and STT in
-//! `stt` (cloud Deepgram); only storage-mode and real-time call audio
-//! remain 501.
+//! download. Voice calls (1:1 + group) are implemented in `calls`, STT in
+//! `stt` (cloud Deepgram) and storage-mode in `storage_mode` (fixed server
+//! storage); only real-time 1:1 call audio remains 501.
 
 use std::sync::Arc;
 
@@ -26,8 +26,8 @@ pub mod graphql_http;
 pub mod media;
 pub mod messages;
 pub mod search;
+pub mod storage_mode;
 pub mod stt;
-pub mod stubs;
 pub mod telegram_auth;
 pub mod topics;
 
@@ -135,8 +135,10 @@ pub fn api_router(ctx: Arc<ServerContext>) -> Router {
         .route("/agent-keys/scopes", get(agent_keys::list_scopes))
         .route("/agent-keys/{key_id}", delete(agent_keys::revoke_key))
         .route("/audit", get(agent_keys::read_audit))
-        // 501 stubs: STT, storage-mode (desktop-only engines)
-        .merge(stubs::router())
+        // Storage-mode: fixed server-side storage (GET reports it, PUT 400s —
+        // the local/remote toggle is desktop-only; see routes/storage_mode.rs).
+        .route("/storage-mode", get(storage_mode::get_storage_mode))
+        .route("/storage-mode", put(storage_mode::set_storage_mode))
         // Layer order (inner→outer as added): idempotency → agent policy →
         // audit → auth. Audit records policy rejections and replays.
         .layer(middleware::from_fn_with_state(ctx.clone(), crate::policy::idempotency))

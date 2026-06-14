@@ -48,7 +48,11 @@ documented **501** explaining audio is client-side. Group-call *mute* is a
 real MTProto signal (`editGroupCallParticipant`), so it is fully implemented
 on the server.
 
-Remaining Phase-2 stub (501): the app-specific storage-mode toggle.
+Storage-mode is reported honestly rather than stubbed: the desktop `local`
+(on-device SQLite) / `remote` (this server) toggle does not apply to a headless
+server, which always persists state server-side. `GET /storage-mode` returns
+`{mode:"server", configurable:false, reason}` and `PUT /storage-mode` returns a
+`400` (the mode is fixed) — no remaining `501` here.
 
 ## Speech-to-text (STT)
 
@@ -247,8 +251,10 @@ curl -s -X PUT -H "$TOK" -H 'content-type: application/json' \
   -d '{"deepgramApiKey":"<your-deepgram-key>"}' $BASE/stt/settings
 curl -s -X POST -H "$TOK" -H 'content-type: application/octet-stream' \
   --data-binary @voice.ogg $BASE/stt/transcribe   # -> {"text":...}
-# Remaining 501 stub: storage-mode
-curl -s -o /dev/null -w '%{http_code}\n' -H "$TOK" $BASE/storage-mode   # -> 501
+# 8c. Storage-mode: fixed server-side (GET reports it; PUT 400s — desktop-only toggle)
+curl -s -H "$TOK" $BASE/storage-mode   # -> {"mode":"server","configurable":false,"reason":...}
+curl -s -o /dev/null -w '%{http_code}\n' -X PUT -H "$TOK" \
+  -H 'content-type: application/json' -d '{"mode":"local"}' $BASE/storage-mode   # -> 400
 
 # 9. Restart the server: sessions reload from disk (encrypted with
 #    SESSION_MASTER_KEY), GET /accounts shows the account again.

@@ -11,14 +11,6 @@ fn op(summary: &str, tag: &str) -> serde_json::Value {
     serde_json::json!({ "summary": summary, "tags": [tag], "responses": { "200": { "description": "OK" } } })
 }
 
-fn stub_op(summary: &str, tag: &str) -> serde_json::Value {
-    serde_json::json!({
-        "summary": format!("{summary} (501 in this phase)"),
-        "tags": [tag],
-        "responses": { "501": { "description": "Not implemented in this phase" } }
-    })
-}
-
 /// Audio-only 1:1 endpoints that a headless server cannot serve: real-time
 /// mute/volume drive the desktop VoIP sidecar. Documented 501 (signaling and
 /// state are available via the other /calls/* routes).
@@ -162,7 +154,10 @@ pub async fn openapi_json() -> Json<serde_json::Value> {
             "responses": { "200": { "description": "{text, language?}" } } } },
         "/api/v1/stt/models/download": { "post": op("Download a Whisper model (desktop-only; returns a structured 'unavailable on server' response)", "stt") },
         "/api/v1/stt/models": { "get": op("Whisper model status (local Whisper is desktop-only on the server)", "stt") },
-        "/api/v1/storage-mode": { "get": stub_op("Get storage mode", "meta"), "put": stub_op("Set storage mode", "meta") },
+        "/api/v1/storage-mode": {
+            "get": op("Get the server's storage mode (always fixed server-side; {mode, configurable:false, reason})", "meta"),
+            "put": op("Set storage mode — rejected with 400: the server's storage is fixed; the local/remote toggle is desktop-only", "meta")
+        },
     });
 
     Json(serde_json::json!({

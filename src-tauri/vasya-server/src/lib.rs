@@ -226,12 +226,15 @@ mod tests {
         assert_eq!(body_json(res).await, serde_json::json!([]));
     }
 
+    /// storage-mode is no longer a 501 stub: GET reports the server's fixed
+    /// storage mode (200), PUT rejects changes with a 400 — the local/remote
+    /// toggle is desktop-only. (Mirrors the STT "structured, not 501" pattern.)
     #[tokio::test]
-    async fn stubs_return_501() {
-        // storage-mode remains a desktop-only stub. (STT is now implemented:
-        // /stt/models returns a structured "unavailable on server" 200, not 501.)
+    async fn storage_mode_reports_fixed_not_501() {
         let (_dir, app) = test_app("tok");
+
         let res = app
+            .clone()
             .oneshot(
                 Request::get("/api/v1/storage-mode")
                     .header("Authorization", "Bearer tok")
@@ -240,7 +243,23 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(res.status(), StatusCode::NOT_IMPLEMENTED);
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = body_json(res).await;
+        assert_eq!(body["mode"], serde_json::json!("server"));
+        assert_eq!(body["configurable"], serde_json::json!(false));
+
+        // PUT can't change the fixed server storage mode → 400, never 501.
+        let res = app
+            .oneshot(
+                Request::put("/api/v1/storage-mode")
+                    .header("Authorization", "Bearer tok")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"mode":"local"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
     }
 
     /// STT is implemented on the server (cloud Deepgram). The local-Whisper

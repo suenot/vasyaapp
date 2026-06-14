@@ -101,4 +101,5 @@ Login is a flow: `request_login_code` → `verify_login_code` → (if it returns
 ## Out of scope
 
 Voice/group calls and STT/transcription are implemented on the REST side but
-have no MCP tools yet. Storage-mode is still `501` (desktop-only).
+have no MCP tools yet. Storage-mode is fixed server-side (REST `GET` reports it,
+`PUT` 400s — the local/remote toggle is desktop-only) and has no MCP tool.
