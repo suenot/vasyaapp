@@ -8,6 +8,7 @@
 
 pub mod events;
 pub mod media;
+pub mod stt;
 pub mod telegram;
 
 pub use telegram::TelegramClientManager;

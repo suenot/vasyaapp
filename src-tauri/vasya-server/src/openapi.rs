@@ -135,10 +135,33 @@ pub async fn openapi_json() -> Json<serde_json::Value> {
         "/api/v1/accounts/{acc}/group-calls/leave": { "post": op("Leave a group call {callId} (204)", "calls") },
         "/api/v1/accounts/{acc}/group-calls/participants": { "get": op("List group call participants; query: callId, accessHash", "calls") },
         "/api/v1/accounts/{acc}/group-calls/mute": { "post": op("Mute/unmute self in a group call {callId, muted} (204)", "calls") },
-        "/api/v1/stt/settings": { "get": stub_op("STT settings", "stt"), "put": stub_op("Update STT settings", "stt") },
-        "/api/v1/stt/transcribe": { "post": stub_op("Transcribe audio", "stt") },
-        "/api/v1/stt/models/download": { "post": stub_op("Download a Whisper model", "stt") },
-        "/api/v1/stt/models": { "get": stub_op("Whisper model status", "stt") },
+        "/api/v1/stt/settings": {
+            "get": op("STT settings for the caller; the Deepgram key is never returned (masked preview only)", "stt"),
+            "put": { "summary": "Update STT settings {provider?, deepgramApiKey?, whisperModel?, language?} — key is write-only; empty string clears it",
+                "tags": ["stt"],
+                "requestBody": { "content": { "application/json": { "schema": { "type": "object",
+                    "properties": {
+                        "provider": { "type": "string", "enum": ["deepgram", "local_whisper"] },
+                        "deepgramApiKey": { "type": "string", "description": "write-only; empty string clears" },
+                        "whisperModel": { "type": "string" },
+                        "language": { "type": "string" } } } } } },
+                "responses": { "200": { "description": "Updated settings (key masked)" } } }
+        },
+        "/api/v1/stt/transcribe": { "post": {
+            "summary": "Transcribe audio (cloud Deepgram). Either raw audio bytes in the body (optional x-language header), or application/json {accountId, chatId, messageId, language?} to fetch and transcribe a Telegram voice message",
+            "tags": ["stt"],
+            "requestBody": { "content": {
+                "application/octet-stream": { "schema": { "type": "string", "format": "binary" } },
+                "application/json": { "schema": { "type": "object",
+                    "properties": {
+                        "accountId": { "type": "string" },
+                        "chatId": { "type": "integer" },
+                        "messageId": { "type": "integer" },
+                        "language": { "type": "string" } },
+                    "required": ["accountId", "chatId", "messageId"] } } } },
+            "responses": { "200": { "description": "{text, language?}" } } } },
+        "/api/v1/stt/models/download": { "post": op("Download a Whisper model (desktop-only; returns a structured 'unavailable on server' response)", "stt") },
+        "/api/v1/stt/models": { "get": op("Whisper model status (local Whisper is desktop-only on the server)", "stt") },
         "/api/v1/storage-mode": { "get": stub_op("Get storage mode", "meta"), "put": stub_op("Set storage mode", "meta") },
     });
 
