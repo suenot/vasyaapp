@@ -813,6 +813,73 @@ mod tests {
         }
     }
 
+    /// The web build authenticates via an HttpOnly session cookie. Safe methods
+    /// need no CSRF token; state-changing methods require a matching
+    /// double-submit CSRF token (the cookie is auto-sent cross-site, the header
+    /// is not — so requiring the header defeats CSRF).
+    #[tokio::test]
+    async fn cookie_session_auth_with_csrf() {
+        let (_dir, app) = test_app("tok");
+
+        // GET with the session cookie authenticates (safe method, no CSRF).
+        let res = app
+            .clone()
+            .oneshot(
+                Request::get("/api/v1/accounts")
+                    .header("cookie", "vasya_token=tok")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let creds = r#"{"apiId":1,"apiHash":"abcdef0123456789"}"#;
+
+        // Cookie-authed mutation WITHOUT a CSRF token is rejected.
+        let res = app
+            .clone()
+            .oneshot(
+                Request::put("/api/v1/telegram/credentials")
+                    .header("cookie", "vasya_token=tok")
+                    .header("content-type", "application/json")
+                    .body(Body::from(creds))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+
+        // Matching double-submit CSRF token → passes.
+        let res = app
+            .clone()
+            .oneshot(
+                Request::put("/api/v1/telegram/credentials")
+                    .header("cookie", "vasya_token=tok; vasya_csrf=csrf-abc")
+                    .header("x-csrf-token", "csrf-abc")
+                    .header("content-type", "application/json")
+                    .body(Body::from(creds))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        // Wrong CSRF token → rejected.
+        let res = app
+            .oneshot(
+                Request::put("/api/v1/telegram/credentials")
+                    .header("cookie", "vasya_token=tok; vasya_csrf=csrf-abc")
+                    .header("x-csrf-token", "WRONG")
+                    .header("content-type", "application/json")
+                    .body(Body::from(creds))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    }
+
     #[tokio::test]
     async fn split_destructive_scopes_enforced() {
         let (_dir, app) = test_app("tok");

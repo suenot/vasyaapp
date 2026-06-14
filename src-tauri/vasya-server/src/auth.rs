@@ -154,6 +154,36 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     result == 0
 }
 
+/// Name of the HttpOnly cookie carrying the human session token (JWT/local) for
+/// the browser web build. Set by the issuer (backend); accepted here when no
+/// `Authorization` header is present.
+pub const SESSION_COOKIE: &str = "vasya_token";
+/// Double-submit CSRF token: a JS-readable cookie whose value the client echoes
+/// in the [`CSRF_HEADER`] on every state-changing request.
+pub const CSRF_COOKIE: &str = "vasya_csrf";
+/// Request header carrying the CSRF token for double-submit validation.
+pub const CSRF_HEADER: &str = "x-csrf-token";
+
+fn is_mutating(method: &axum::http::Method) -> bool {
+    use axum::http::Method;
+    matches!(
+        *method,
+        Method::POST | Method::PUT | Method::DELETE | Method::PATCH
+    )
+}
+
+/// Extract a single cookie value from the `Cookie` request header.
+fn cookie_value(headers: &axum::http::HeaderMap, name: &str) -> Option<String> {
+    headers
+        .get(axum::http::header::COOKIE)?
+        .to_str()
+        .ok()?
+        .split(';')
+        .filter_map(|kv| kv.split_once('='))
+        .find(|(k, _)| k.trim() == name)
+        .map(|(_, v)| v.trim().to_string())
+}
+
 /// Bearer-auth middleware applied to every /api/v1 route except /health
 /// and /openapi.json. Accepts either a human session token (JWT / local
 /// token, all scopes implicit) or an agent key (`vk_...`, scoped — the
@@ -164,33 +194,64 @@ pub async fn require_auth(
     mut req: Request,
     next: Next,
 ) -> Result<Response, ApiError> {
-    let bearer = req
+    // 1. Authorization: Bearer — human token or agent key. NOT CSRF-vulnerable
+    //    (a browser never auto-attaches an Authorization header cross-site).
+    if let Some(bearer) = req
         .headers()
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .and_then(|s| s.strip_prefix("Bearer "))
-        .ok_or(ApiError::Unauthorized)?;
-
-    if bearer.starts_with("vk_") {
-        let (user_id, identity) = ctx
-            .agent_keys
-            .authenticate(bearer)
-            .ok_or(ApiError::Unauthorized)?;
-        // The owner id becomes an on-disk path segment in some handlers.
-        if !is_safe_user_id(&user_id) {
-            return Err(ApiError::Unauthorized);
+        .map(|s| s.to_string())
+    {
+        if bearer.starts_with("vk_") {
+            let (user_id, identity) = ctx
+                .agent_keys
+                .authenticate(&bearer)
+                .ok_or(ApiError::Unauthorized)?;
+            // The owner id becomes an on-disk path segment in some handlers.
+            if !is_safe_user_id(&user_id) {
+                return Err(ApiError::Unauthorized);
+            }
+            req.extensions_mut().insert(UserId(user_id));
+            req.extensions_mut().insert(identity);
+        } else {
+            let user = ctx.auth.authenticate(&bearer)?;
+            // Reject a JWT `sub` that could traverse per-user state paths.
+            if !is_safe_user_id(&user.0) {
+                return Err(ApiError::Unauthorized);
+            }
+            req.extensions_mut().insert(user);
         }
-        req.extensions_mut().insert(UserId(user_id));
-        req.extensions_mut().insert(identity);
-    } else {
-        let user = ctx.auth.authenticate(bearer)?;
-        // Reject a JWT `sub` that could traverse per-user state paths.
+        return Ok(next.run(req).await);
+    }
+
+    // 2. HttpOnly session cookie (browser web build). Cookies ARE auto-sent
+    //    cross-site, so enforce CSRF on state-changing requests via a
+    //    double-submit token. Agent keys never authenticate via cookie.
+    if let Some(token) = cookie_value(req.headers(), SESSION_COOKIE) {
+        if is_mutating(req.method()) {
+            let header_csrf = req
+                .headers()
+                .get(CSRF_HEADER)
+                .and_then(|v| v.to_str().ok());
+            let cookie_csrf = cookie_value(req.headers(), CSRF_COOKIE);
+            let ok = matches!(
+                (header_csrf, cookie_csrf.as_deref()),
+                (Some(h), Some(c)) if !c.is_empty() && constant_time_eq(h.as_bytes(), c.as_bytes())
+            );
+            if !ok {
+                return Err(ApiError::Forbidden("Missing or invalid CSRF token".into()));
+            }
+        }
+        let user = ctx.auth.authenticate(&token)?;
         if !is_safe_user_id(&user.0) {
             return Err(ApiError::Unauthorized);
         }
         req.extensions_mut().insert(user);
+        return Ok(next.run(req).await);
     }
-    Ok(next.run(req).await)
+
+    Err(ApiError::Unauthorized)
 }
 
 #[cfg(test)]
