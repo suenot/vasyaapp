@@ -86,6 +86,23 @@ impl AuthMode {
 #[derive(Debug, Clone)]
 pub struct UserId(pub String);
 
+/// Whether a resolved user id is safe to use as an on-disk path segment.
+///
+/// The user id (JWT `sub`, or the embedded `local`) is used verbatim as a
+/// directory name for per-user state — STT settings (`data_dir/stt/{user}/…`)
+/// and folder/tab UI-state (`data_dir/ui-state/{user}/…`). A `sub` containing
+/// `/`, `..`, or an absolute path would escape `data_dir`. The signing secret
+/// is shared with the backend, so we don't trust `sub` to be a UUID — we
+/// enforce it here, at the one auth choke point, before any handler runs.
+/// UUIDs and the literal `local` id pass.
+pub(crate) fn is_safe_user_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 128
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
 /// Constant-time comparison to prevent timing attacks.
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
@@ -120,10 +137,18 @@ pub async fn require_auth(
             .agent_keys
             .authenticate(bearer)
             .ok_or(ApiError::Unauthorized)?;
+        // The owner id becomes an on-disk path segment in some handlers.
+        if !is_safe_user_id(&user_id) {
+            return Err(ApiError::Unauthorized);
+        }
         req.extensions_mut().insert(UserId(user_id));
         req.extensions_mut().insert(identity);
     } else {
         let user = ctx.auth.authenticate(bearer)?;
+        // Reject a JWT `sub` that could traverse per-user state paths.
+        if !is_safe_user_id(&user.0) {
+            return Err(ApiError::Unauthorized);
+        }
         req.extensions_mut().insert(user);
     }
     Ok(next.run(req).await)
@@ -140,6 +165,22 @@ mod tests {
         assert!(!constant_time_eq(b"hello", b"hell"));
         assert!(constant_time_eq(b"", b""));
         assert!(!constant_time_eq(b"", b"a"));
+    }
+
+    #[test]
+    fn safe_user_id_accepts_uuid_and_local_rejects_traversal() {
+        // Legitimate ids pass.
+        assert!(is_safe_user_id("local"));
+        assert!(is_safe_user_id("42f00000-0000-0000-0000-000000000042"));
+        assert!(is_safe_user_id("user_123"));
+        // Path-traversal / escape attempts are rejected.
+        assert!(!is_safe_user_id("../../etc/cron.d/x"));
+        assert!(!is_safe_user_id("/etc/passwd"));
+        assert!(!is_safe_user_id("a/b"));
+        assert!(!is_safe_user_id(".."));
+        assert!(!is_safe_user_id("a.b")); // '.' not allowed → no dotfiles either
+        assert!(!is_safe_user_id(""));
+        assert!(!is_safe_user_id(&"x".repeat(129)));
     }
 
     #[test]

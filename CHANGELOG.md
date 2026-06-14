@@ -1,6 +1,12 @@
 # Changelog
 
 ## [Unreleased]
+### Security
+- **Hardened the agent/web API after a security review.**
+  - *Pagination DoS fixed:* `GET …/messages` and `…/messages/search` now clamp the caller-supplied `limit` (default 50, max 200). Previously an unbounded `?limit=` flowed into `Vec::with_capacity`, so one request could trigger a capacity-overflow panic / OOM.
+  - *Path-traversal hardening:* the resolved user id (JWT `sub`) is validated (`[A-Za-z0-9_-]`, ≤128) at the auth choke point before it is ever used as an on-disk path segment for per-user STT/folder state — a crafted `sub` can no longer escape the data dir.
+  - *SSE allowlist:* `GET /api/v1/events` now enforces an agent key's per-account allowlist (reject `?account=` outside the list with 403; filter excluded accounts from the unfiltered stream), matching GraphQL subscriptions and the STT handler.
+
 ### Server / infra
 - **Speech-to-text over the REST API.** `vasya-server` now exposes voice-message transcription (scope `stt:use`) instead of `501` stubs: `GET/PUT /api/v1/stt/settings` (per-user provider + Deepgram key — the key is write-only, stored masked, never logged or echoed back), `POST /api/v1/stt/transcribe` (raw audio upload *or* `{accountId, chatId, messageId}` to transcribe a voice message already in a chat) and `GET /api/v1/stt/models`. On the headless server the default and only working provider is **cloud Deepgram** (bring-your-own-key); **local Whisper is desktop-only** (its `stt-sidecar` binary is excluded from the server image) so selecting it returns a clear `400` and `GET /stt/models` reports `{available:false}` (200, not 501). The Deepgram call + voice-message fetch now live in `vasya-core::stt`, shared by the desktop app and the server.
 - **Finer-grained agent-key scopes.** Destructive operations now have their own scopes instead of being bundled with broad ones: `accounts:delete` (log out / delete an account — was `telegram:login`), `chats:delete` (delete/leave a chat — was `chats:write`) and `messages:forward` (was `messages:send`). `telegram:login` now covers login only and `chats:write` group/channel creation only. `GET /api/v1/agent-keys/scopes` now returns `{scope, description}` objects.

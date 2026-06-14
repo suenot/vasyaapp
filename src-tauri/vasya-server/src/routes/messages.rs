@@ -84,6 +84,18 @@ pub struct GetMessagesQuery {
     pub topic_id: Option<i32>,
 }
 
+/// Upper bound on how many messages one request may ask for. Caps the
+/// caller-supplied `limit` so it can never drive an unbounded
+/// `Vec::with_capacity` (a single-request capacity-overflow panic / OOM DoS).
+pub(crate) const MAX_MESSAGE_LIMIT: usize = 200;
+
+/// Resolve and clamp a caller-supplied message `limit`: default 50, capped at
+/// [`MAX_MESSAGE_LIMIT`]. Untrusted query input must never reach
+/// `Vec::with_capacity` unclamped.
+fn clamp_message_limit(limit: Option<usize>) -> usize {
+    limit.unwrap_or(50).min(MAX_MESSAGE_LIMIT)
+}
+
 pub(crate) async fn get_messages_op(
     ctx: &Arc<ServerContext>,
     user: &UserId,
@@ -95,7 +107,7 @@ pub(crate) async fn get_messages_op(
 ) -> Result<Vec<Message>, ApiError> {
     let wrapper = account_client(ctx, user, account_id).await?;
     let chat = resolve_peer(&wrapper, chat_id).await?;
-    let limit = limit.unwrap_or(50);
+    let limit = clamp_message_limit(limit);
 
     // For forum topics, use messages.getReplies with msg_id = topic_id
     if let Some(tid) = topic_id {
@@ -485,7 +497,7 @@ pub(crate) async fn search_messages_op(
     let wrapper = account_client(ctx, user, account_id).await?;
     let chat = resolve_peer(&wrapper, chat_id).await?;
 
-    let limit = limit.unwrap_or(50);
+    let limit = clamp_message_limit(limit);
     let mut search_iter = wrapper.client.search_messages(&chat).query(q);
 
     let mut messages = Vec::with_capacity(limit);
@@ -512,4 +524,22 @@ pub async fn search_messages(
     Ok(Json(
         search_messages_op(&ctx, &user.0, &account_id, chat_id, &query.q, query.limit).await?,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn message_limit_is_clamped() {
+        // Default when absent.
+        assert_eq!(clamp_message_limit(None), 50);
+        // Small values pass through.
+        assert_eq!(clamp_message_limit(Some(10)), 10);
+        // At the cap.
+        assert_eq!(clamp_message_limit(Some(MAX_MESSAGE_LIMIT)), MAX_MESSAGE_LIMIT);
+        // The DoS input: a huge usize must be capped, never reaching Vec::with_capacity.
+        assert_eq!(clamp_message_limit(Some(usize::MAX)), MAX_MESSAGE_LIMIT);
+        assert_eq!(clamp_message_limit(Some(500_000_000)), MAX_MESSAGE_LIMIT);
+    }
 }

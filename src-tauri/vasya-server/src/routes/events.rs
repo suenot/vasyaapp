@@ -15,8 +15,10 @@ use serde::Deserialize;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::{Stream, StreamExt};
 
+use crate::agent_keys::AgentIdentity;
 use crate::auth::{UserId, LOCAL_USER_ID};
 use crate::context::ServerContext;
+use crate::error::ApiError;
 
 #[derive(Deserialize)]
 pub struct EventsQuery {
@@ -26,9 +28,22 @@ pub struct EventsQuery {
 pub async fn sse_events(
     State(ctx): State<Arc<ServerContext>>,
     user: Extension<UserId>,
+    agent: Option<Extension<AgentIdentity>>,
     Query(filter): Query<EventsQuery>,
-) -> Sse<impl Stream<Item = Result<SseEvent, Infallible>>> {
+) -> Result<Sse<impl Stream<Item = Result<SseEvent, Infallible>>>, ApiError> {
     let user_id = user.0 .0.clone();
+    let agent = agent.map(|Extension(a)| a);
+
+    // The path-based allowlist gate in policy.rs only matches /accounts/{acc}/…,
+    // so `/events` slips past it; enforce the agent's per-account allowlist here
+    // (mirroring GraphQL subscriptions and the STT body handler). Reject an
+    // explicit ?account= the key isn't allowed to reach.
+    if let (Some(agent), Some(want)) = (&agent, &filter.account) {
+        if !agent.allows_account(want) {
+            return Err(ApiError::Forbidden("account not in key allowlist".into()));
+        }
+    }
+
     let rx = ctx.events.subscribe();
 
     let stream = BroadcastStream::new(rx).filter_map(move |item| {
@@ -44,10 +59,15 @@ pub async fn sse_events(
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
 
-        // Per-user isolation: only events for accounts the caller owns.
+        // Per-user isolation: only events for accounts the caller owns, and —
+        // for agent keys — only accounts within the key's allowlist (an agent
+        // with no ?account filter must still not receive excluded accounts).
         // Events without accountId go to the embedded local user only.
         let allowed = match &account {
-            Some(acc) => ctx.accounts.is_owner(&user_id, acc),
+            Some(acc) => {
+                ctx.accounts.is_owner(&user_id, acc)
+                    && agent.as_ref().map_or(true, |a| a.allows_account(acc))
+            }
             None => user_id == LOCAL_USER_ID,
         };
         if !allowed {
@@ -67,5 +87,5 @@ pub async fn sse_events(
         Some(Ok(sse))
     });
 
-    Sse::new(stream).keep_alive(KeepAlive::default())
+    Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
 }

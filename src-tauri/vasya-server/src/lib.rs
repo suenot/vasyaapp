@@ -673,6 +673,60 @@ mod tests {
             .contains("allowlist"));
     }
 
+    /// SSE `/events` is not under `/accounts/{acc}/…`, so the path-based
+    /// allowlist gate can't see it — the handler enforces the agent allowlist
+    /// itself. A key scoped to one account must not stream another's events.
+    #[tokio::test]
+    async fn sse_events_respects_agent_account_allowlist() {
+        let (_dir, app) = test_app("tok");
+
+        // A key allowed only on acc-allowed, holding events:read.
+        let body = serde_json::json!({
+            "name": "sse-bot",
+            "scopes": ["events:read"],
+            "accountIds": ["acc-allowed"],
+        })
+        .to_string();
+        let res = app
+            .clone()
+            .oneshot(
+                Request::post("/api/v1/agent-keys")
+                    .header("Authorization", "Bearer tok")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let secret = body_json(res).await["secret"].as_str().unwrap().to_string();
+
+        // A non-listed account is rejected up-front (not a silent empty stream).
+        let res = app
+            .clone()
+            .oneshot(
+                Request::get("/api/v1/events?account=acc-other")
+                    .header("Authorization", format!("Bearer {secret}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+
+        // The listed account opens the stream.
+        let res = app
+            .oneshot(
+                Request::get("/api/v1/events?account=acc-allowed")
+                    .header("Authorization", format!("Bearer {secret}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+    }
+
     #[tokio::test]
     async fn split_destructive_scopes_enforced() {
         let (_dir, app) = test_app("tok");
