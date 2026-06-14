@@ -340,7 +340,7 @@ server.tool(
 
 server.tool(
   "delete_account",
-  "Log out and remove a connected account from the server (scope: telegram:login). Irreversible — the session is dropped; logging back in needs the code flow again.",
+  "Log out and remove a connected account from the server (scope: accounts:delete). Irreversible — the session is dropped; logging back in needs the code flow again.",
   { accountId },
   async ({ accountId }) => asText(await api("DELETE", `/accounts/${accountId}`, undefined, true)),
 );

@@ -20,6 +20,8 @@ The engine (`vasya-core`) is fronted by **`vasya-server`** — an API gateway yo
 - **Agent-native**: scoped API keys (`vk_…`) with a per-key permission scope, an **audit log**, and **idempotency-key** replay — safe to give an autonomous agent.
 - **MCP server** (`vasya-mcp/`): wraps the REST API as **29 Model Context Protocol tools** at REST parity, so an LLM can run the login flow, manage accounts, create/delete chats, send & download media, edit folders/tabs, search and read/send messages — the full messenger. Configure with `VASYA_API_URL` + `VASYA_AGENT_KEY`.
 
+📖 **Full integration guide:** [`docs/api/README.md`](docs/api/README.md) — auth & agent keys, scopes table, REST/GraphQL/SSE quickstart, the MCP tool reference, and the security model. Trust model summary: [`SECURITY.md`](SECURITY.md) (the server is **not** end-to-end encrypted).
+
 ## 🧩 Deployment modes (self-hostable, no lock-in)
 
 Same UI, four ways to run the engine — pick per use case:
