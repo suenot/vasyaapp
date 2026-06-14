@@ -22,6 +22,7 @@ use axum::{Extension, Json};
 use serde::{Deserialize, Serialize};
 use vasya_core::telegram::client_manager::TelegramClientWrapper;
 
+use crate::agent_keys::AgentIdentity;
 use crate::auth::UserId;
 use crate::context::ServerContext;
 use crate::dto::{SttSettingsResponse, SttSettingsUpdate, TranscriptionResponse};
@@ -293,6 +294,7 @@ async fn fetch_message_audio(
 pub async fn transcribe(
     State(ctx): State<Arc<ServerContext>>,
     user: Extension<UserId>,
+    agent: Option<Extension<AgentIdentity>>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Json<TranscriptionResponse>, ApiError> {
@@ -311,6 +313,14 @@ pub async fn transcribe(
     if is_json {
         let req: TranscribeRef = serde_json::from_slice(&body)
             .map_err(|e| ApiError::BadRequest(format!("Invalid JSON body: {e}")))?;
+        // This shape targets a specific account via the JSON body, so the
+        // path-based per-account allowlist in `policy.rs` (which only sees
+        // `/stt/transcribe`) can't enforce it — do it here, mirroring REST.
+        if let Some(Extension(agent)) = &agent {
+            if !agent.allows_account(&req.account_id) {
+                return Err(ApiError::Forbidden("account not in key allowlist".into()));
+            }
+        }
         let language = req
             .language
             .as_deref()

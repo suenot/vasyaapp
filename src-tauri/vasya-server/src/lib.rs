@@ -602,6 +602,58 @@ mod tests {
         }
     }
 
+    /// STT transcribe-by-reference targets an account via the JSON body, not
+    /// the URL path, so the path-based allowlist gate in `policy.rs` can't see
+    /// it — the `/stt/transcribe` handler enforces the allowlist itself. A key
+    /// scoped to one account must not transcribe another account's voice
+    /// message, even with `stt:use`.
+    #[tokio::test]
+    async fn stt_transcribe_respects_agent_account_allowlist() {
+        let (_dir, app) = test_app("tok");
+
+        // A key allowed only on acc-allowed, holding stt:use.
+        let body = serde_json::json!({
+            "name": "stt-bot",
+            "scopes": ["stt:use"],
+            "accountIds": ["acc-allowed"],
+        })
+        .to_string();
+        let res = app
+            .clone()
+            .oneshot(
+                Request::post("/api/v1/agent-keys")
+                    .header("Authorization", "Bearer tok")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let secret = body_json(res).await["secret"].as_str().unwrap().to_string();
+
+        // Transcribing a voice message in a NON-listed account is blocked by
+        // the allowlist gate before any Telegram work happens.
+        let res = app
+            .clone()
+            .oneshot(
+                Request::post("/api/v1/stt/transcribe")
+                    .header("Authorization", format!("Bearer {secret}"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"accountId":"acc-other","chatId":5,"messageId":9}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+        assert!(body_json(res).await["error"]
+            .as_str()
+            .unwrap()
+            .contains("allowlist"));
+    }
+
     #[tokio::test]
     async fn split_destructive_scopes_enforced() {
         let (_dir, app) = test_app("tok");
