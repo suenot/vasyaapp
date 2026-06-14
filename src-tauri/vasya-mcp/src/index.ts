@@ -137,7 +137,15 @@ async function sendMedia(
     "Idempotency-Key": randomUUID(),
     "x-file-name": encodeHeader(meta.fileName),
   };
-  if (meta.mimeType) headers["x-mime-type"] = meta.mimeType;
+  if (meta.mimeType) {
+    // The server reads x-mime-type raw (no percent-decode), so validate against
+    // a strict MIME shape rather than encode — blocks header injection (CR/LF,
+    // control chars) while allowing real types like image/svg+xml.
+    if (!/^[\w.+-]+\/[\w.+-]+$/.test(meta.mimeType)) {
+      throw new Error(`Invalid mimeType: ${meta.mimeType}`);
+    }
+    headers["x-mime-type"] = meta.mimeType;
+  }
   if (meta.caption !== undefined) headers["x-caption"] = encodeHeader(meta.caption);
 
   const response = await fetch(`${BASE_URL}/api/v1${path}`, {
