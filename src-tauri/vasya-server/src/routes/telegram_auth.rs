@@ -4,7 +4,6 @@
 use std::sync::Arc;
 
 use axum::extract::State;
-use axum::http::StatusCode;
 use axum::{Extension, Json};
 use grammers_client::SignInError;
 use serde::{Deserialize, Serialize};
@@ -25,32 +24,7 @@ fn mask_phone(phone: &str) -> String {
     format!("***{}", last4)
 }
 
-#[derive(Serialize)]
-pub struct CredentialsStatus {
-    pub configured: bool,
-}
-
-pub async fn credentials_status(
-    State(ctx): State<Arc<ServerContext>>,
-) -> Json<CredentialsStatus> {
-    let configured = ctx.manager.api_id() != 0 && !ctx.manager.api_hash().is_empty();
-    Json(CredentialsStatus { configured })
-}
-
-#[derive(Deserialize)]
-pub struct UpdateCredentialsRequest {
-    pub api_id: i32,
-    pub api_hash: String,
-}
-
-pub async fn update_credentials(
-    State(ctx): State<Arc<ServerContext>>,
-    Json(req): Json<UpdateCredentialsRequest>,
-) -> StatusCode {
-    tracing::info!(api_id = req.api_id, "Updating API credentials");
-    ctx.manager.update_credentials(req.api_id, req.api_hash);
-    StatusCode::NO_CONTENT
-}
+// Credential management lives in `routes::telegram_creds` (per-user + admin).
 
 #[derive(Deserialize)]
 pub struct LoginCodeRequest {
@@ -69,16 +43,16 @@ pub(crate) async fn request_login_code_op(
     user: &UserId,
     phone: String,
 ) -> Result<LoginCodeResponse, ApiError> {
-    let api_id = ctx.manager.api_id();
-    let api_hash = ctx.manager.api_hash();
+    // Use the caller's own Telegram credentials if they set any, else the
+    // server's global default (see routes::telegram_creds).
+    let (api_id, api_hash) =
+        crate::routes::telegram_creds::resolve_credentials(ctx, &user.0)
+            .await?
+            .ok_or_else(|| {
+                ApiError::BadRequest("Telegram API credentials not configured".into())
+            })?;
 
     tracing::info!(phone = %mask_phone(&phone), api_id, "Requesting login code");
-
-    if api_id == 0 || api_hash.is_empty() {
-        return Err(ApiError::BadRequest(
-            "Telegram API credentials not configured".into(),
-        ));
-    }
 
     ctx.rate.check_mutation(&phone)?;
 
@@ -88,7 +62,7 @@ pub(crate) async fn request_login_code_op(
 
     let wrapper = ctx
         .manager
-        .create_client(account_id.clone(), phone.clone())
+        .create_client_with_api_id(account_id.clone(), phone.clone(), api_id)
         .await
         .map_err(|e| ApiError::internal(format!("Failed to create client: {e}")))?;
 

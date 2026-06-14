@@ -103,7 +103,23 @@ pub async fn agent_policy(
                 "Agent keys cannot manage keys or read the audit log".into(),
             ))
         }
+        // Admin routes (e.g. the global Telegram credentials) are human-only —
+        // an agent key whose owner is an admin must NOT inherit admin rights.
+        Some(&"admin") => {
+            return Err(ApiError::Forbidden(
+                "Agent keys cannot access admin routes".into(),
+            ))
+        }
         _ => {}
+    }
+
+    // Credential management (per-user api_id/api_hash) is human-session-only;
+    // agents log in with the resolved credentials but cannot change them.
+    // (Note: /telegram/login/* stays agent-allowed via the scope map below.)
+    if segments.as_slice() == ["telegram", "credentials"] {
+        return Err(ApiError::Forbidden(
+            "Agent keys cannot manage Telegram credentials".into(),
+        ));
     }
 
     let scope = required_scope(req.method(), &segments)

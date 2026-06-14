@@ -41,6 +41,10 @@ pub use rate_limit::RateLimitConfig;
 /// Options for assembling a server context around an existing engine.
 pub struct ServerOptions {
     pub auth: AuthMode,
+    /// Who may manage global server settings. Defaults from the auth mode in
+    /// `new()` (embedded → the local owner; JWT → none). The standalone binary
+    /// overrides this from `VASYA_ADMIN_USERS`.
+    pub admins: auth::AdminPolicy,
     /// Directory for accounts.json, folder/tab stores and the media cache.
     pub data_dir: PathBuf,
     pub rate_limit: RateLimitConfig,
@@ -56,8 +60,16 @@ pub struct ServerOptions {
 
 impl ServerOptions {
     pub fn new(auth: AuthMode, data_dir: PathBuf) -> Self {
+        // Default admin policy follows the auth mode: the embedded desktop owner
+        // is the admin; a standalone JWT server has no admins until configured
+        // (see main.rs / VASYA_ADMIN_USERS).
+        let admins = match &auth {
+            AuthMode::EmbeddedLocal { .. } => auth::AdminPolicy::embedded_local(),
+            AuthMode::Jwt { .. } => auth::AdminPolicy::default(),
+        };
         Self {
             auth,
+            admins,
             data_dir,
             rate_limit: RateLimitConfig::default(),
             agent_rate_limit: RateLimitConfig {
@@ -93,6 +105,7 @@ pub fn build_context(
         manager,
         events: Arc::new(BroadcastEventSink::new(options.events_capacity)),
         auth: options.auth,
+        admins: options.admins,
         accounts,
         rate: rate_limit::RateLimiter::new(options.rate_limit),
         agent_keys,
@@ -725,6 +738,79 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    /// Credential management is human-session-only and the global default is
+    /// admin-only. Critically, an agent key whose owner (`local`) is an admin
+    /// must NOT inherit admin/credential rights — admin privileges never leak
+    /// to agent keys.
+    #[tokio::test]
+    async fn telegram_credentials_human_only_and_admin_gated() {
+        let (_dir, app) = test_app("tok");
+        let creds = r#"{"apiId":111,"apiHash":"abcdef0123456789"}"#;
+
+        // Human local session (admin in embedded mode) sets the global default.
+        let res = app
+            .clone()
+            .oneshot(
+                Request::put("/api/v1/admin/telegram/credentials")
+                    .header("Authorization", "Bearer tok")
+                    .header("content-type", "application/json")
+                    .body(Body::from(creds))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        // Human sets their OWN per-user creds; GET reflects source=user.
+        let res = app
+            .clone()
+            .oneshot(
+                Request::put("/api/v1/telegram/credentials")
+                    .header("Authorization", "Bearer tok")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"apiId":222,"apiHash":"fedcba9876543210"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let res = app
+            .clone()
+            .oneshot(
+                Request::get("/api/v1/telegram/credentials")
+                    .header("Authorization", "Bearer tok")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = body_json(res).await;
+        assert_eq!(body["source"], serde_json::json!("user"));
+        assert_eq!(body["apiId"], serde_json::json!(222));
+        assert_eq!(body["isAdmin"], serde_json::json!(true));
+
+        // An agent key (owner = local, an admin) is BLOCKED from both the admin
+        // route and credential management — admin/cred rights don't leak to keys.
+        let (_id, secret) = create_agent_key(&app, &["telegram:login"]).await;
+        for path in [
+            "/api/v1/admin/telegram/credentials",
+            "/api/v1/telegram/credentials",
+        ] {
+            let res = app
+                .clone()
+                .oneshot(
+                    Request::put(path)
+                        .header("Authorization", format!("Bearer {secret}"))
+                        .header("content-type", "application/json")
+                        .body(Body::from(creds))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(res.status(), StatusCode::FORBIDDEN, "{path}");
+        }
     }
 
     #[tokio::test]

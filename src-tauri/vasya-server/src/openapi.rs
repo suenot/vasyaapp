@@ -48,12 +48,20 @@ pub async fn openapi_json() -> Json<serde_json::Value> {
         "/api/v1/audit": { "get": op("Recent audit entries for mutating calls (?limit=, human sessions only)", "agent-keys") },
 
         "/api/v1/telegram/credentials": {
-            "get": op("Whether Telegram api_id/api_hash are configured", "telegram-auth"),
-            "put": { "summary": "Set Telegram api_id/api_hash", "tags": ["telegram-auth"],
+            "get": op("The caller's effective Telegram credentials status {configured, source: user|global|none, apiId?, apiHashMasked?, isAdmin}", "telegram-auth"),
+            "put": { "summary": "Set the CALLER's own api_id/api_hash (opt-in; logins then use them, else fall back to the global default). Human sessions only.", "tags": ["telegram-auth"],
                 "requestBody": { "content": { "application/json": { "schema": { "type": "object",
-                    "properties": { "api_id": { "type": "integer" }, "api_hash": { "type": "string" } },
-                    "required": ["api_id", "api_hash"] } } } },
-                "responses": { "204": { "description": "Updated" } } }
+                    "properties": { "apiId": { "type": "integer" }, "apiHash": { "type": "string" } },
+                    "required": ["apiId", "apiHash"] } } } },
+                "responses": { "200": { "description": "Effective credentials status" } } },
+            "delete": op("Clear the caller's own credentials (fall back to the global default). Human sessions only.", "telegram-auth")
+        },
+        "/api/v1/admin/telegram/credentials": {
+            "put": { "summary": "Set the server-global default api_id/api_hash. ADMIN + human only (agent keys are rejected).", "tags": ["telegram-auth"],
+                "requestBody": { "content": { "application/json": { "schema": { "type": "object",
+                    "properties": { "apiId": { "type": "integer" }, "apiHash": { "type": "string" } },
+                    "required": ["apiId", "apiHash"] } } } },
+                "responses": { "200": { "description": "Effective credentials status" }, "403": { "description": "Not an admin" } } }
         },
         "/api/v1/telegram/login/code": { "post": { "summary": "Request a Telegram login code (starts a new account login)",
             "tags": ["telegram-auth"],

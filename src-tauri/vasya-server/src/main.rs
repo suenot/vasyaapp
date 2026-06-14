@@ -38,7 +38,7 @@ async fn main() -> Result<()> {
         .unwrap_or(0);
     let api_hash = std::env::var("TELEGRAM_API_HASH").unwrap_or_default();
     if api_id == 0 || api_hash.is_empty() {
-        tracing::warn!("TELEGRAM_API_ID / TELEGRAM_API_HASH not set — logins will fail until configured via PUT /api/v1/telegram/credentials");
+        tracing::warn!("TELEGRAM_API_ID / TELEGRAM_API_HASH not set — logins fall back to nothing until an admin sets the global default (PUT /api/v1/admin/telegram/credentials) or each user sets their own (PUT /api/v1/telegram/credentials)");
     }
 
     let auth = match std::env::var("AUTH_MODE").as_deref() {
@@ -84,6 +84,25 @@ async fn main() -> Result<()> {
     let mut options = ServerOptions::new(auth, data_dir);
     options.graphql_playground =
         std::env::var("VASYA_GRAPHQL_PLAYGROUND").is_ok_and(|v| v == "1" || v == "true");
+
+    // Admins (may set the global Telegram credentials). Embedded mode already
+    // defaults to the local owner; in JWT mode admins come ONLY from
+    // VASYA_ADMIN_USERS (never settable via the API, so users can't escalate).
+    if matches!(options.auth, AuthMode::Jwt { .. }) {
+        let admins: Vec<String> = std::env::var("VASYA_ADMIN_USERS")
+            .unwrap_or_default()
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if admins.is_empty() {
+            tracing::warn!("VASYA_ADMIN_USERS not set — no user can change the global Telegram credentials over the API; set it to a comma-separated list of admin user ids");
+        } else {
+            tracing::info!(count = admins.len(), "Admin users loaded from VASYA_ADMIN_USERS");
+        }
+        options.admins = vasya_server::auth::AdminPolicy::jwt(admins);
+    }
+
     let ctx = build_context(manager, options)?;
 
     let loaded = start_existing_sessions(&ctx).await?;

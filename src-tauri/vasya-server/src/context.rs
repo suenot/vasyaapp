@@ -15,7 +15,7 @@ use vasya_core::TelegramClientManager;
 use crate::accounts::AccountStore;
 use crate::agent_keys::AgentKeyStore;
 use crate::audit::AuditLog;
-use crate::auth::AuthMode;
+use crate::auth::{AdminPolicy, AuthMode};
 use crate::dto::Chat;
 use crate::idempotency::IdempotencyStore;
 use crate::rate_limit::RateLimiter;
@@ -26,6 +26,9 @@ pub struct ServerContext {
     /// (task #5) and the /events SSE endpoint fan out from it.
     pub events: Arc<BroadcastEventSink>,
     pub auth: AuthMode,
+    /// Who may manage server-global settings (global Telegram credentials).
+    /// Config-sourced only; never settable via the API.
+    pub admins: AdminPolicy,
     pub accounts: AccountStore,
     pub rate: RateLimiter,
     /// Scoped agent API keys + their stricter per-key mutation quota.
@@ -55,6 +58,11 @@ pub struct ServerContext {
 }
 
 impl ServerContext {
+    /// Whether the given user id is a server admin (config-sourced).
+    pub fn is_admin(&self, user_id: &str) -> bool {
+        self.admins.is_admin(user_id)
+    }
+
     /// The updates context wiring an account's update pump to the bus.
     pub fn updates_context(&self) -> UpdatesContext {
         UpdatesContext {

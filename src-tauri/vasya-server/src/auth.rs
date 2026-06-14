@@ -86,6 +86,45 @@ impl AuthMode {
 #[derive(Debug, Clone)]
 pub struct UserId(pub String);
 
+/// Who counts as a server admin (may manage the global Telegram credentials and
+/// other server-wide settings). Sourced ONLY from server configuration
+/// (embedded owner, or the `VASYA_ADMIN_USERS` env list) — never settable via
+/// the API, so a regular user cannot escalate to admin. Agent keys are never
+/// admins regardless of their owner (admin routes are human-session-only,
+/// enforced in `policy.rs`).
+#[derive(Clone, Default)]
+pub struct AdminPolicy {
+    /// Explicit admin user ids (JWT mode).
+    user_ids: std::collections::HashSet<String>,
+    /// In embedded-local mode the single owner (`local`) is the admin.
+    embedded_local_is_admin: bool,
+}
+
+impl AdminPolicy {
+    /// JWT mode: admins are the configured user ids (e.g. `VASYA_ADMIN_USERS`).
+    pub fn jwt<I: IntoIterator<Item = String>>(user_ids: I) -> Self {
+        Self {
+            user_ids: user_ids.into_iter().collect(),
+            embedded_local_is_admin: false,
+        }
+    }
+
+    /// Embedded-local desktop mode: the single `local` owner is the admin.
+    pub fn embedded_local() -> Self {
+        Self {
+            user_ids: std::collections::HashSet::new(),
+            embedded_local_is_admin: true,
+        }
+    }
+
+    /// Whether this user id is an admin. (Callers must also ensure the request
+    /// is a human session, not an agent key — see `policy.rs`.)
+    pub fn is_admin(&self, user_id: &str) -> bool {
+        (self.embedded_local_is_admin && user_id == LOCAL_USER_ID)
+            || self.user_ids.contains(user_id)
+    }
+}
+
 /// Whether a resolved user id is safe to use as an on-disk path segment.
 ///
 /// The user id (JWT `sub`, or the embedded `local`) is used verbatim as a
@@ -165,6 +204,25 @@ mod tests {
         assert!(!constant_time_eq(b"hello", b"hell"));
         assert!(constant_time_eq(b"", b""));
         assert!(!constant_time_eq(b"", b"a"));
+    }
+
+    #[test]
+    fn admin_policy_sources_are_config_only() {
+        // Embedded-local: only the `local` owner is admin.
+        let p = AdminPolicy::embedded_local();
+        assert!(p.is_admin(LOCAL_USER_ID));
+        assert!(!p.is_admin("someone-else"));
+
+        // JWT: only explicitly-listed user ids are admins.
+        let p = AdminPolicy::jwt(["admin-1".to_string(), "admin-2".to_string()]);
+        assert!(p.is_admin("admin-1"));
+        assert!(p.is_admin("admin-2"));
+        assert!(!p.is_admin("regular-user"));
+        assert!(!p.is_admin(LOCAL_USER_ID)); // embedded shortcut does not apply in JWT mode
+
+        // Default (no config) → nobody is admin.
+        assert!(!AdminPolicy::default().is_admin("anyone"));
+        assert!(!AdminPolicy::default().is_admin(LOCAL_USER_ID));
     }
 
     #[test]

@@ -267,11 +267,13 @@ impl QueryRoot {
         Ok(routes::accounts::list_accounts_op(sctx, user).await)
     }
 
-    /// Whether Telegram api_id/api_hash are configured.
+    /// Whether Telegram api_id/api_hash are configured for the caller (their own
+    /// per-user credentials if set, otherwise the global default).
     async fn credentials_configured(&self, ctx: &Context<'_>) -> Result<bool> {
-        let sctx = server_ctx(ctx);
-        authorize(ctx, "telegram:login", None)?;
-        Ok(sctx.manager.api_id() != 0 && !sctx.manager.api_hash().is_empty())
+        let (sctx, user) = (server_ctx(ctx), authorize(ctx, "telegram:login", None)?);
+        Ok(routes::telegram_creds::resolve_credentials(sctx, &user.0)
+            .await?
+            .is_some())
     }
 
     /// Chats; `live: true` forces a fresh dialog iteration (default cache).
@@ -456,14 +458,22 @@ impl MutationRoot {
     }
 
     /// Set Telegram api_id/api_hash.
+    /// Set the server-global default Telegram credentials. Admin + human only,
+    /// mirroring REST `PUT /admin/telegram/credentials`. An agent key (even one
+    /// owned by an admin) is rejected. Per-user credentials are set over REST.
     async fn update_credentials(
         &self,
         ctx: &Context<'_>,
         api_id: i32,
         api_hash: String,
     ) -> Result<bool> {
-        let sctx = server_ctx(ctx);
-        authorize(ctx, "telegram:login", None)?;
+        let (sctx, user) = (server_ctx(ctx), auth_user(ctx)?);
+        if ctx.data_opt::<AgentIdentity>().is_some() {
+            return Err(forbidden("Agent keys cannot manage Telegram credentials"));
+        }
+        if !sctx.is_admin(&user.0) {
+            return Err(forbidden("Admin privileges required"));
+        }
         sctx.manager.update_credentials(api_id, api_hash);
         Ok(true)
     }

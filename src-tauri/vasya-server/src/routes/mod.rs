@@ -29,6 +29,7 @@ pub mod search;
 pub mod storage_mode;
 pub mod stt;
 pub mod telegram_auth;
+pub mod telegram_creds;
 pub mod topics;
 
 /// Max raw media upload size.
@@ -56,9 +57,13 @@ pub fn api_router(ctx: Arc<ServerContext>) -> Router {
     let protected = Router::new()
         // GraphQL queries/mutations (same bearer middleware as REST)
         .route("/graphql", post(graphql_http::graphql_post))
-        // Telegram API credentials
-        .route("/telegram/credentials", get(telegram_auth::credentials_status))
-        .route("/telegram/credentials", put(telegram_auth::update_credentials))
+        // Telegram API credentials: per-user (opt-in) + admin-only global
+        // default (see routes/telegram_creds.rs). Credential management is
+        // human-session-only (agent keys are blocked in policy.rs).
+        .route("/telegram/credentials", get(telegram_creds::get_credentials))
+        .route("/telegram/credentials", put(telegram_creds::put_user_credentials))
+        .route("/telegram/credentials", delete(telegram_creds::delete_user_credentials))
+        .route("/admin/telegram/credentials", put(telegram_creds::put_admin_credentials))
         // Telegram login flow
         .route("/telegram/login/code", post(telegram_auth::request_login_code))
         .route("/telegram/login/verify", post(telegram_auth::verify_code))

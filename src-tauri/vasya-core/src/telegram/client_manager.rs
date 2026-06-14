@@ -117,7 +117,12 @@ impl TelegramClientManager {
     /// Build a `SenderPool` for a session, honoring the optional SOCKS5 proxy.
     /// `proxy_url == None` reproduces the historical `SenderPool::new` path.
     fn build_pool(&self, session: Arc<EncryptedSession>) -> SenderPool {
-        let api_id = self.api_id();
+        self.build_pool_with_api_id(session, self.api_id())
+    }
+
+    /// Like [`build_pool`] but with an explicit `api_id` so a login can use
+    /// per-user Telegram credentials instead of the manager's global default.
+    fn build_pool_with_api_id(&self, session: Arc<EncryptedSession>, api_id: i32) -> SenderPool {
         match &self.proxy_url {
             Some(url) => SenderPool::with_configuration(
                 session,
@@ -191,13 +196,26 @@ impl TelegramClientManager {
         account_id: String,
         phone: String,
     ) -> Result<Arc<TelegramClientWrapper>> {
+        let api_id = self.api_id();
+        self.create_client_with_api_id(account_id, phone, api_id).await
+    }
+
+    /// Like [`create_client`] but with an explicit `api_id` for the SenderPool,
+    /// so a login can use the caller's per-user Telegram credentials. The
+    /// matching `api_hash` is passed separately to `request_login_code`.
+    pub async fn create_client_with_api_id(
+        &self,
+        account_id: String,
+        phone: String,
+        api_id: i32,
+    ) -> Result<Arc<TelegramClientWrapper>> {
         let session = self.open_session(&account_id)?;
         self.sessions
             .write()
             .await
             .insert(account_id.clone(), session.clone());
 
-        let pool = self.build_pool(session);
+        let pool = self.build_pool_with_api_id(session, api_id);
         let client = Client::new(&pool);
 
         // Destructure pool — runner drives the network, save updates receiver
