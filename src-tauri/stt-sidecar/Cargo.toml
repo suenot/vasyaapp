@@ -2,6 +2,7 @@
 name = "stt-sidecar"
 version = "0.1.0"
 edition = "2021"
+license = "Unlicense"
 
 [dependencies]
 whisper-rs = "0.12"

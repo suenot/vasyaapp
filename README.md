@@ -135,7 +135,7 @@ input — it is never embedded in the binary.
 
 ## 📝 License
 
-MIT
+[The Unlicense](LICENSE) — public domain. Do whatever you want with it.
 
 ## 👤 Author
 
