@@ -1,0 +1,36 @@
+.translation-description {
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0 0 16px;
+}
+.translation-settings h2 { margin-bottom: 20px; }
+.translation-fields { margin: 24px 0; padding: 0; border: 0; min-width: 0; }
+.translation-field { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; font-size: 14px; color: var(--text-primary); }
+.translation-field > span { font-weight: 500; }
+.translation-field input {
+  width: 100%; box-sizing: border-box; min-width: 0; padding: 11px 12px;
+  color: var(--text-primary); background: var(--bg-secondary); border: 1px solid var(--border-color);
+  border-radius: 8px; font: inherit; outline: none;
+}
+.translation-field input:focus { border-color: var(--accent-color); }
+.translation-field small { color: var(--text-secondary); font-size: 12px; line-height: 1.45; }
+.translation-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 20px; }
+.translation-button {
+  padding: 9px 14px; border: 1px solid var(--border-color); border-radius: 8px;
+  color: var(--text-primary); background: var(--bg-secondary); font: inherit; font-size: 13px; cursor: pointer;
+}
+.translation-button:hover { background: var(--bg-tertiary); }
+.translation-button-primary { background: var(--accent-color); border-color: var(--accent-color); color: #fff; }
+.translation-button-primary:hover { background: var(--accent-color); filter: brightness(1.06); }
+.translation-button-subtle { color: var(--text-secondary); }
+.translation-button:disabled, .translation-fields:disabled { opacity: .55; cursor: default; }
+.translation-error { margin: 12px 0; color: var(--danger-color, #d85454); font-size: 13px; overflow-wrap: anywhere; }
+.translation-error p { margin: 6px 0; }
+.translation-saved { color: var(--text-secondary); font-size: 13px; }
+.chat-translation-controls .translation-field { margin: 10px 0 16px; }
+.chat-translation-controls .translation-field input { background: var(--bg-primary); }
+.chat-translation-toggle { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; color: var(--text-primary); font-size: 14px; font-weight: 500; }
+.chat-translation-toggle .toggle-switch { flex-shrink: 0; }
+.chat-translation-controls .translation-description { margin-bottom: 10px; font-size: 12px; }
+.chat-translation-target-error { font-size: 12px; color: var(--danger-color, #d85454); }

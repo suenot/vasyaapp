@@ -1,5 +1,8 @@
 import { useState, useCallback, useRef, useEffect, KeyboardEvent, ClipboardEvent, DragEvent } from 'react';
-import { invoke, sendMedia } from '../../transport';
+import { getTransport, sendMedia } from '../../transport';
+import { DEFAULT_CHAT_TRANSLATION, translationSessionKey, translationChatKey, useTranslationStore } from '../../store/translationStore';
+import { useComposerDraftStore, EMPTY_COMPOSER_DRAFT } from '../../store/composerDraftStore';
+import { canClearSentDraft, prepareOutgoingText } from '../../services/translationRuntime';
 import { readImage } from '@tauri-apps/plugin-clipboard-manager';
 import { useMessagesStore } from '../../store/messagesStore';
 import { Message } from '../../types/telegram';
@@ -24,10 +27,25 @@ function formatFileSize(bytes: number): string {
 
 export const MessageInput = ({ accountId, chatId, topicId, onMessageSent }: MessageInputProps) => {
   const { t } = useTranslation();
-  const [text, setText] = useState('');
-  const [sending, setSending] = useState(false);
-  const [mediaFile, setMediaFile] = useState<File | null>(null);
+  const currentContext = `${translationSessionKey()}:${translationChatKey(accountId, chatId)}:${topicId ?? ''}`;
+  const draft = useComposerDraftStore(state => state.drafts[currentContext] ?? EMPTY_COMPOSER_DRAFT);
+  const { text, file: mediaFile, error: sendError } = draft;
+  const setText = useCallback((value: string) => useComposerDraftStore.getState().update(currentContext, { text: value }), [currentContext]);
+  const setMediaFile = useCallback((file: File | null) => useComposerDraftStore.getState().update(currentContext, { file }), [currentContext]);
+  const [localSending, setSending] = useState(false);
+  const sending = localSending || draft.sending;
+  const [translating, setTranslating] = useState(false);
+  const sendGuard = useRef(false);
+  const mountedRef = useRef(true);
+  const contextRef = useRef(currentContext);
+  contextRef.current = currentContext;
+  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
   const [mediaPreview, setMediaPreview] = useState<string | null>(null);
+  useEffect(() => {
+    if (!mediaFile) { setMediaPreview(null); return; }
+    const url = URL.createObjectURL(mediaFile); setMediaPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [mediaFile]);
   const [isRecording, setIsRecording] = useState(false);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
@@ -64,14 +82,13 @@ export const MessageInput = ({ accountId, chatId, topicId, onMessageSent }: Mess
     if (mediaPreview) URL.revokeObjectURL(mediaPreview);
     setMediaFile(null);
     setMediaPreview(null);
-  }, [mediaPreview]);
+  }, [mediaPreview, setMediaFile]);
 
   /** Set media from a File object */
   const applyMediaFile = useCallback((file: File) => {
     clearMedia();
     setMediaFile(file);
-    setMediaPreview(URL.createObjectURL(file));
-  }, [clearMedia]);
+  }, [clearMedia, setMediaFile]);
 
   /** Convert RGBA pixel data to PNG Blob via OffscreenCanvas */
   const rgbaToPngBlob = useCallback(async (rgba: Uint8Array, width: number, height: number): Promise<Blob> => {
@@ -170,38 +187,54 @@ export const MessageInput = ({ accountId, chatId, topicId, onMessageSent }: Mess
 
   const handleSend = useCallback(async () => {
     const trimmedText = text.trim();
-    if ((!trimmedText && !mediaFile) || sending) return;
-
-    const tempId = `temp_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-
-    addOptimisticMessage(chatId, tempId, trimmedText);
-    setText('');
+    if ((!trimmedText && !mediaFile) || sending || sendGuard.current) return;
+    sendGuard.current = true;
+    const captured = { context: currentContext, revision: draft.revision };
+    const backend = translationSessionKey();
+    const settingsGeneration = useTranslationStore.getState().generation;
+    const backendUnchanged = () => translationSessionKey() === backend && useTranslationStore.getState().generation === settingsGeneration;
+    const active = () => mountedRef.current && contextRef.current === captured.context;
+    const preferences = useTranslationStore.getState().chats[translationChatKey(accountId, chatId)] ?? DEFAULT_CHAT_TRANSLATION;
     const currentMedia = mediaFile;
-    clearMedia();
-    setSending(true);
-
+    const tempId = `temp_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    let optimistic = false;
+    setSending(true); useComposerDraftStore.getState().update(captured.context, { error: null, sending: true });
+    setTranslating(preferences.outgoingEnabled && !!trimmedText);
     try {
+      const transport = getTransport();
+      if (preferences.outgoingEnabled && !preferences.outgoingTarget.trim()) throw new Error('Choose an outgoing translation language.');
+      const prepared = await prepareOutgoingText(trimmedText, preferences.outgoingEnabled ? preferences.outgoingTarget.trim() : null,
+        async (source, targetLanguage) => (await transport.call<{ text: string }>('translate_text', { text: source, targetLanguage })).text, backendUnchanged);
+      if (active()) { setTranslating(false); addOptimisticMessage(chatId, tempId, prepared); optimistic = true; }
       let sentMessage: Message;
       if (currentMedia) {
-        sentMessage = await sendMediaBytes(currentMedia, trimmedText);
+        const buffer = await currentMedia.arrayBuffer();
+        if (!backendUnchanged()) throw new Error('Connection changed. Attachment was not sent.');
+        const headers: Record<string, string> = { 'x-account-id': accountId, 'x-chat-id': String(chatId), 'x-file-name': encodeURIComponent(currentMedia.name), 'x-mime-type': currentMedia.type || 'application/octet-stream' };
+        if (prepared) headers['x-caption'] = encodeURIComponent(prepared);
+        sentMessage = await transport.sendMedia<Message>(new Uint8Array(buffer), headers);
       } else {
-        sentMessage = await invoke<Message>('send_message', {
-          accountId,
-          chatId,
-          text: trimmedText,
-          topicId,
-        });
+        sentMessage = await transport.call<Message>('send_message', { accountId, chatId, text: prepared, topicId });
       }
-
-      confirmOptimisticMessage(chatId, tempId, sentMessage);
-      onMessageSent?.(sentMessage);
+      const latest = useComposerDraftStore.getState().drafts[captured.context] ?? EMPTY_COMPOSER_DRAFT;
+      if (canClearSentDraft(captured, { context: captured.context, revision: latest.revision })) {
+        useComposerDraftStore.getState().update(captured.context, { text: '', file: null, error: null });
+      }
+      if (active()) {
+        if (optimistic) confirmOptimisticMessage(chatId, tempId, sentMessage);
+        onMessageSent?.(sentMessage);
+      }
     } catch (error) {
-      console.error('[MessageInput] Failed to send:', error);
-      failOptimisticMessage(chatId, tempId);
+      if (active()) {
+        if (optimistic) failOptimisticMessage(chatId, tempId);
+      }
+      useComposerDraftStore.getState().update(captured.context, { error: error instanceof Error ? error.message : String(error) });
     } finally {
-      setSending(false);
+      sendGuard.current = false;
+      useComposerDraftStore.getState().update(captured.context, { sending: false });
+      if (mountedRef.current) { setSending(false); setTranslating(false); }
     }
-  }, [text, sending, mediaFile, accountId, chatId, topicId, addOptimisticMessage, confirmOptimisticMessage, failOptimisticMessage, onMessageSent, clearMedia, sendMediaBytes]);
+  }, [text, sending, mediaFile, accountId, chatId, topicId, currentContext, draft.revision, addOptimisticMessage, confirmOptimisticMessage, failOptimisticMessage, onMessageSent, clearMedia]);
 
   const handleKeyDown = useCallback((e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -310,6 +343,8 @@ export const MessageInput = ({ accountId, chatId, topicId, onMessageSent }: Mess
           </div>
         </div>
       )}
+      {sendError && <div role="alert" style={{ padding: '8px 16px', color: 'var(--text-danger, #d64a4a)' }}>{sendError}</div>}
+      {translating && <div role="status" style={{ padding: '6px 16px', opacity: 0.8 }}>{t('translation_sending')}</div>}
       <div className="message-input-container">
         {/* Attachment button */}
         <div className="attach-btn-wrapper">

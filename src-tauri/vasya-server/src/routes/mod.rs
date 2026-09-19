@@ -31,6 +31,7 @@ pub mod stt;
 pub mod telegram_auth;
 pub mod telegram_creds;
 pub mod topics;
+pub mod translation;
 
 /// Max raw media upload size.
 const MEDIA_BODY_LIMIT: usize = 128 * 1024 * 1024;
@@ -68,6 +69,9 @@ pub fn api_router(ctx: Arc<ServerContext>) -> Router {
         .route("/telegram/login/code", post(telegram_auth::request_login_code))
         .route("/telegram/login/verify", post(telegram_auth::verify_code))
         .route("/telegram/login/password", post(telegram_auth::check_password))
+        // Provider credentials are per-user and human-session only.
+        .route("/translation/settings", get(translation::get_settings).put(translation::put_settings).layer(DefaultBodyLimit::max(16 * 1024)))
+        .route("/translation/translate", post(translation::translate).layer(DefaultBodyLimit::max(256 * 1024)))
         // Accounts
         .route("/accounts", get(accounts::list_accounts))
         .route("/accounts/{acc}", delete(accounts::logout))

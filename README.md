@@ -141,3 +141,9 @@ input — it is never embedded in the binary.
 
 **Евгений (suenot)**
 - GitHub: [@suenot](https://github.com/suenot)
+
+## Automatic translation
+
+Settings → Translation configures your OpenAI-compatible model API and encrypted token. Chat menu → Translation independently enables incoming and outgoing target languages. See [setup, behavior and API](docs/translation.md).
+
+Product version is defined in `package.json`. After a release bump, run `npm run version:sync` to generate the Rust manifest/lock mirror; `npm run build` checks consistency.

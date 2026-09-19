@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { invoke, getServerConfig } from '../../transport';
 import { ProfileSettings } from './ProfileSettings';
+import { TranslationSettings } from './TranslationSettings';
 import { useAccountsStore } from '../../store/accountsStore';
 import { useAuthStore } from '../../store/authStore';
 import { useThemeStore, ThemeSetting } from '../../store/themeStore';
@@ -18,9 +19,10 @@ import './AccountSettings.css';
 
 interface AccountSettingsProps {
   onClose: () => void;
+  initialSection?: SettingsSection;
 }
 
-type SettingsSection = 'general' | 'privacy' | 'data' | 'downloads' | 'stt' | 'hotkeys' | 'folders' | 'devices' | 'language' | 'storage';
+type SettingsSection = 'translation' | 'general' | 'privacy' | 'data' | 'downloads' | 'stt' | 'hotkeys' | 'folders' | 'devices' | 'language' | 'storage';
 
 /** Sortable drag-handle tab row */
 const SortableTabItem = ({ tab, label, icon, isBuiltin, onToggle, onDelete }: {
@@ -66,14 +68,14 @@ const SortableTabItem = ({ tab, label, icon, isBuiltin, onToggle, onDelete }: {
   );
 };
 
-export const AccountSettings = ({ onClose }: AccountSettingsProps) => {
+export const AccountSettings = ({ onClose, initialSection = 'general' }: AccountSettingsProps) => {
   const { t } = useTranslation();
   const { language, setLanguage } = useLanguageStore();
   const { getActiveAccount, accounts, removeAccount, setActiveAccount, clearActiveAccount } = useAccountsStore();
   const [loggingOut, setLoggingOut] = useState(false);
   const { themeSetting, setThemeSetting } = useThemeStore();
-  const [activeSection, setActiveSection] = useState<SettingsSection>('general');
-  const [mobileContentOpen, setMobileContentOpen] = useState(false);
+  const [activeSection, setActiveSection] = useState<SettingsSection>(initialSection);
+  const [mobileContentOpen, setMobileContentOpen] = useState(initialSection !== 'general');
   const [showProfileEdit, setShowProfileEdit] = useState(false);
 
   const { queued, active, completed, failed, activeItems, queuedItems } = useDownloadStore();
@@ -1325,6 +1327,7 @@ export const AccountSettings = ({ onClose }: AccountSettingsProps) => {
       case 'data': return renderDataSettings();
       case 'downloads': return renderDownloadsSettings();
       case 'stt': return renderSttSettings();
+      case 'translation': return <TranslationSettings />;
       case 'hotkeys': return renderHotkeysSettings();
       case 'language': return renderLanguageSettings();
       case 'folders': return renderFoldersSettings();
@@ -1396,6 +1399,10 @@ export const AccountSettings = ({ onClose }: AccountSettingsProps) => {
                 </span>
                 {t('nav_downloads')}
                 {(active + queued > 0) && <span className="settings-nav-badge">{active + queued}</span>}
+              </button>
+              <button className={`settings-nav-item ${activeSection === 'translation' ? 'active' : ''}`} onClick={() => { setActiveSection('translation'); setMobileContentOpen(true); }}>
+                <span className="settings-nav-icon" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 5h12M9 3v2M5 5c1 5 4 8 8 10M13 5c-1 5-4 8-8 10M14 21l4-10 4 10M16 17h4" /></svg></span>
+                {t('translation_title')}
               </button>
               <button className={`settings-nav-item ${activeSection === 'stt' ? 'active' : ''}`} onClick={() => { setActiveSection('stt'); setMobileContentOpen(true); }}>
                 <span className="settings-nav-icon">

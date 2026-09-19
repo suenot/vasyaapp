@@ -179,6 +179,14 @@ export class HttpTransport implements TelegramTransport {
     const a = (args ?? {}) as Record<string, any>;
 
     switch (command) {
+      case 'get_translation_settings':
+        return this.json<T>('GET', '/translation/settings');
+      case 'set_translation_settings':
+        return this.json<T>('PUT', '/translation/settings', { body: a.settings });
+      case 'translate_text':
+        return this.json<T>('POST', '/translation/translate', {
+          body: { text: a.text, targetLanguage: a.targetLanguage },
+        });
       // --- credentials + Telegram login -------------------------------------
       case 'has_api_credentials': {
         const r = await this.json<{ configured: boolean }>('GET', '/telegram/credentials');

@@ -18,6 +18,22 @@
 - **Per-account allowlist on agent keys.** Pass `accountIds` when creating a key (`POST /api/v1/agent-keys`) to restrict it to specific accounts; a `/accounts/{acc}/…` request that already clears its required scope but targets an account outside the list returns 403 `account not in key allowlist`. Omitted/empty = all the owner's accounts (unchanged). The allowlist is reflected in `GET /api/v1/agent-keys`. The allowlist is also enforced for `POST /api/v1/stt/transcribe` when it targets an account via its JSON body.
 - **Storage-mode over REST (no longer a 501 stub).** `GET /api/v1/storage-mode` reports the server's fixed storage mode (`{mode:"server", configurable:false, reason}`) and `PUT /api/v1/storage-mode` returns `400` — the server always persists state server-side, so the desktop-only `local`/`remote` toggle does not apply. (Mirrors the STT "structured response instead of 501" pattern.)
 
+## [0.9.0] - 2026-09-19
+
+### Added
+- Optional automatic translation in each chat, with independent incoming and outgoing target languages.
+- Application-wide OpenAI-compatible LLM API URL, model and write-only token settings, supported by desktop IPC and authenticated remote REST.
+- Incoming translation with original-text access, bounded background work and cache invalidation when text, language or provider settings change.
+
+### Fixed
+- Translation errors preserve outgoing drafts and prevent accidental untranslated sends; translated media captions use the same send path.
+
+### Security
+- Store translation API credentials encrypted with the existing master-key provider; never return tokens in settings responses or provider errors.
+
+### Changed
+- Use `package.json` as the product-version source; Tauri reads it directly and `npm run version:sync` generates the Cargo mirror checked before frontend builds.
+
 ## [0.8.0] - 2026-06-12
 ### Web
 - **Vasyapp now runs in the browser.** The same React UI talks to a remote `vasya-server` over HTTP/SSE instead of the in-process Tauri engine. Self-host it from `backend/deploy/`; connect with your server URL + a JWT (email/password against the backend) or an access token. Builds can pre-fill the API origin via the `VITE_VASYA_API_URL` build var.

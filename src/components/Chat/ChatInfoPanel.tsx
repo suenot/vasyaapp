@@ -3,6 +3,7 @@ import { convertFileSrc } from '../../transport';
 import { Chat } from '../../types/telegram';
 import { useTranslation, TranslationKey } from '../../i18n';
 import { AvatarViewer } from './AvatarViewer';
+import { ChatTranslationSettings } from './ChatTranslationSettings';
 
 interface ChatInfoPanelProps {
   chat: Chat;
@@ -47,6 +48,7 @@ export const ChatInfoPanel = ({ chat, accountId, onClose }: ChatInfoPanelProps) 
           {chat.username && <div className="chat-info-username">@{chat.username}</div>}
           <div className="chat-info-type">{typeLabel}</div>
         </div>
+        <ChatTranslationSettings key={`${accountId}:${chat.id}`} accountId={accountId} chatId={chat.id} />
         <div className="chat-info-section">
           <div className="chat-info-section-title">{t('details')}</div>
           <div className="chat-info-row">

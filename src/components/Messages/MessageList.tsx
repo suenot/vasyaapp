@@ -11,10 +11,12 @@ import { MediaAttachment } from './MediaAttachment';
 import { MessageInput } from './MessageInput';
 import { MessageContextMenu } from './MessageContextMenu';
 import { SelectionBar } from './SelectionBar';
-import { MarkdownRenderer, hasMarkdown } from './MarkdownRenderer';
+import { hasMarkdown } from './MarkdownRenderer';
 import { ForwardDialog } from './ForwardDialog';
 import { useTranslation } from '../../i18n';
 import './MessageList.css';
+import { TranslatedText } from './TranslatedText';
+import { translationChatKey, translationSessionKey } from '../../store/translationStore';
 
 interface MessageListProps {
   accountId: string;
@@ -251,7 +253,7 @@ const MessageItem = memo(({ message, accountId, chatId, isHighlighted, isGroupCh
         {message.text && (
           <div className={`message-bubble ${cornerClass}`}>
             <div className="message-text">
-              {renderMarkdown ? <MarkdownRenderer text={message.text} /> : message.text}
+              {<TranslatedText accountId={accountId} chatId={chatId} messageId={message.id} text={message.text} outgoing={message.is_outgoing} markdown={renderMarkdown} />}
             </div>
             <div className="message-meta">
               <span className="message-time">{formatTime(message.date)}</span>
@@ -309,7 +311,7 @@ const MessageItem = memo(({ message, accountId, chatId, isHighlighted, isGroupCh
 
 // Memoized merged message item — renders a group of merged messages as one bubble
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-const MergedMessageItem = memo(({ group, accountId: _aid, chatId: _cid, isHighlighted, isGroupChat, isFirstInGroup, isLastInGroup, isSelected, isSelectionMode, renderMarkdown, onToggleSelect, onContextMenu }: {
+const MergedMessageItem = memo(({ group, accountId, chatId, isHighlighted, isGroupChat, isFirstInGroup, isLastInGroup, isSelected, isSelectionMode, renderMarkdown, onToggleSelect, onContextMenu }: {
   group: MergedMessageGroup;
   accountId: string;
   chatId: number;
@@ -398,7 +400,7 @@ const MergedMessageItem = memo(({ group, accountId: _aid, chatId: _cid, isHighli
               {group.messages.map((m, i) => (
                 <div key={m.id} className="merged-expanded-part">
                   <div className="message-text">
-                    {renderMarkdown && m.text ? <MarkdownRenderer text={m.text} /> : m.text}
+                    {m.text && <TranslatedText accountId={accountId} chatId={chatId} messageId={m.id} text={m.text} outgoing={m.is_outgoing} markdown={renderMarkdown} />}
                   </div>
                   {i < group.messages.length - 1 && <div className="merged-separator" />}
                 </div>
@@ -406,7 +408,7 @@ const MergedMessageItem = memo(({ group, accountId: _aid, chatId: _cid, isHighli
             </div>
           ) : (
             <div className="message-text">
-              {renderMarkdown ? <MarkdownRenderer text={group.mergedText} /> : group.mergedText}
+              {<TranslatedText accountId={accountId} chatId={chatId} messageId={message.id} text={group.mergedText} outgoing={message.is_outgoing} markdown={renderMarkdown} />}
             </div>
           )}
           <div className="message-meta">
@@ -468,7 +470,15 @@ interface ContextMenuState {
 }
 
 export const MessageList = forwardRef<MessageListHandle, MessageListProps>(({ accountId, chatId, chatTitle, chatType, highlightedMessageId, topicId, onBackToTopics }, ref) => {
-  const messages = useMessagesStore((s) => s.messagesByChat[chatId] ?? EMPTY_MESSAGES);
+  const historyScope = `${translationSessionKey()}:${translationChatKey(accountId, chatId)}:${topicId ?? ''}`;
+  const historyScopeRef = useRef(historyScope);
+  historyScopeRef.current = historyScope;
+  const mountedRef = useRef(true);
+  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
+  const [loadedScope, setLoadedScope] = useState<string | null>(null);
+  const storedMessages = useMessagesStore((s) => s.messagesByChat[chatId] ?? EMPTY_MESSAGES);
+  // The existing message store is keyed only by peer ID. Do not translate another account's cached rows.
+  const messages = loadedScope === historyScope ? storedMessages : EMPTY_MESSAGES;
   const mergeEnabled = useSettingsStore((s) => s.mergeMessages);
   const mergedGroups = useMergedMessages(messages, mergeEnabled);
   const { t, language } = useTranslation();
@@ -774,6 +784,7 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(({ ac
         limit: 50,
         topicId,
       }).then((fetched) => {
+        if (!mountedRef.current || historyScopeRef.current !== historyScope) return;
         if (fetched.length > 0) {
           useMessagesStore.getState().setMessages(chatId, fetched.reverse());
           useMessagesStore.getState().setHasMore(chatId, true);
@@ -783,7 +794,7 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(({ ac
         pendingScrollRef.current = null;
       });
     },
-  }), [accountId, chatId, topicId, rowVirtualizer]);
+  }), [accountId, chatId, topicId, historyScope, rowVirtualizer]);
 
   // Scroll to a pending target (search jump) once its message is loaded.
   useEffect(() => {
@@ -821,6 +832,7 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(({ ac
 
   // Load initial messages
   useEffect(() => {
+    let cancelled = false;
     // Reset state for new chat
     initialLoadDone.current = false;
     loadingRef.current = true;
@@ -835,7 +847,9 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(({ ac
           limit: 50,
           topicId,
         });
+        if (cancelled) return;
         setMessages(chatId, fetched.reverse());
+        setLoadedScope(historyScope);
         setHasMore(chatId, fetched.length === 50);
 
         // Mark messages as read after loading (send read acknowledgement to Telegram)
@@ -852,6 +866,7 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(({ ac
       } catch (err) {
         console.error('[MessageList] Failed to load messages:', err);
       } finally {
+        if (cancelled) return;
         loadingRef.current = false;
         initialLoadDone.current = true;
         // Force scroll to bottom after initial load, regardless of useEffect race conditions
@@ -863,7 +878,8 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(({ ac
     };
 
     load();
-  }, [chatId, accountId, setMessages, setHasMore, scrollToBottom]);
+    return () => { cancelled = true; };
+  }, [chatId, accountId, topicId, historyScope, setMessages, setHasMore, scrollToBottom]);
 
   // Scroll to bottom only on initial load (not on prepend)
   const prevMessagesLength = useRef(0);
@@ -884,7 +900,7 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(({ ac
 
   // Real-time: new message
   useTauriEvent<NewMessageEvent>('telegram:new-message', useCallback((evt) => {
-    if (evt.chatId !== chatId) return;
+    if (evt.chatId !== chatId || evt.accountId !== accountId) return;
     // Decide whether to follow the bottom BEFORE the new message grows the list:
     // only auto-scroll if it's our own message or the user is already near the
     // bottom — otherwise reading older history is no longer interrupted.
@@ -924,11 +940,11 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(({ ac
 
   // Real-time: message deleted
   useTauriEvent<MessageDeletedEvent>('telegram:message-deleted', useCallback((evt) => {
-    if (evt.chatId !== chatId) return;
+    if (evt.chatId !== chatId || evt.accountId !== accountId) return;
     for (const id of evt.messageIds) {
       removeMessage(chatId, id);
     }
-  }, [chatId, removeMessage]));
+  }, [chatId, accountId, removeMessage]));
 
   // Load older messages on scroll to top
   const handleScroll = useCallback(async (e: React.UIEvent<HTMLDivElement>) => {
@@ -945,6 +961,7 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(({ ac
         limit: 50,
         topicId,
       });
+      if (!mountedRef.current || historyScopeRef.current !== historyScope) return;
       if (older.length === 0) {
         setHasMore(chatId, false);
       } else {
@@ -959,7 +976,7 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(({ ac
     } finally {
       loadingMoreRef.current = false;
     }
-  }, [hasMore, messages, accountId, chatId, prependMessages, setHasMore]);
+  }, [hasMore, messages, accountId, chatId, topicId, historyScope, prependMessages, setHasMore]);
 
   // Callback for MessageInput
   const handleMessageSent = useCallback((newMessage: Message) => {

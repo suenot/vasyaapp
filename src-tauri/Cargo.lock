@@ -5535,7 +5535,7 @@ dependencies = [
 
 [[package]]
 name = "telegram-client"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6272,6 +6272,7 @@ name = "vasya-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "axum",
  "chacha20poly1305",
  "grammers-client",
  "grammers-mtsender",
@@ -6286,6 +6287,7 @@ dependencies = [
  "serde_json",
  "sha1",
  "sha2",
+ "tempfile",
  "tokio",
  "tracing",
 ]
