@@ -39,7 +39,7 @@ impl LocalStorage {
     }
 
     fn run_migrations(&self) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().map_err(|_| anyhow::anyhow!("database mutex poisoned"))?;
         let migration_sql = include_str!("../../migrations/V1__initial_schema.sql");
         conn.execute(migration_sql).context("Failed to run migrations")?;
 
@@ -61,7 +61,7 @@ impl LocalStorage {
     fn now_unix() -> i64 {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_secs() as i64
     }
 }
@@ -72,7 +72,7 @@ impl DataStorage for LocalStorage {
         let conn = Arc::clone(&self.conn);
         let chat = chat.clone();
         tokio::task::spawn_blocking(move || {
-            let conn = conn.lock().unwrap();
+            let conn = conn.lock().map_err(|_| anyhow::anyhow!("database mutex poisoned"))?;
             let now = LocalStorage::now_unix();
 
             let query = "
@@ -126,7 +126,7 @@ impl DataStorage for LocalStorage {
         let conn = Arc::clone(&self.conn);
         let account_id = account_id.to_string();
         tokio::task::spawn_blocking(move || {
-            let conn = conn.lock().unwrap();
+            let conn = conn.lock().map_err(|_| anyhow::anyhow!("database mutex poisoned"))?;
             let query = "
                 SELECT id, account_id, type, title, username, avatar_path,
                        last_message, unread_count, is_forum, updated_at
@@ -141,14 +141,14 @@ impl DataStorage for LocalStorage {
             let mut chats = Vec::new();
             while let Ok(sqlite::State::Row) = stmt.next() {
                 chats.push(ChatRecord {
-                    id: stmt.read::<i64, _>("id").unwrap(),
-                    account_id: stmt.read::<String, _>("account_id").unwrap(),
-                    chat_type: stmt.read::<String, _>("type").unwrap(),
-                    title: stmt.read::<String, _>("title").unwrap(),
-                    username: stmt.read::<Option<String>, _>("username").unwrap(),
-                    avatar_path: stmt.read::<Option<String>, _>("avatar_path").unwrap(),
-                    last_message: stmt.read::<Option<String>, _>("last_message").unwrap(),
-                    unread_count: stmt.read::<i64, _>("unread_count").unwrap() as i32,
+                    id: stmt.read::<i64, _>("id")?,
+                    account_id: stmt.read::<String, _>("account_id")?,
+                    chat_type: stmt.read::<String, _>("type")?,
+                    title: stmt.read::<String, _>("title")?,
+                    username: stmt.read::<Option<String>, _>("username")?,
+                    avatar_path: stmt.read::<Option<String>, _>("avatar_path")?,
+                    last_message: stmt.read::<Option<String>, _>("last_message")?,
+                    unread_count: stmt.read::<i64, _>("unread_count")? as i32,
                     is_forum: stmt.read::<i64, _>("is_forum").unwrap_or(0) != 0,
                 });
             }
@@ -163,34 +163,34 @@ impl DataStorage for LocalStorage {
         let conn = Arc::clone(&self.conn);
         let account_id = account_id.to_string();
         tokio::task::spawn_blocking(move || {
-            let conn = conn.lock().unwrap();
+            let conn = conn.lock().map_err(|_| anyhow::anyhow!("database mutex poisoned"))?;
             let mut stmt = conn.prepare(
                 "SELECT id, name, icon, included_chat_types, excluded_chat_types, \
                  included_chat_ids, excluded_chat_ids, sort_order \
                  FROM chat_folders WHERE account_id = ? ORDER BY sort_order"
             ).context("prepare")?;
-            stmt.bind((1, account_id.as_str())).unwrap();
+            stmt.bind((1, account_id.as_str()))?;
 
             let mut result = Vec::new();
             while let Ok(sqlite::State::Row) = stmt.next() {
                 result.push(FolderRecord {
-                    id: stmt.read::<String, _>("id").unwrap(),
+                    id: stmt.read::<String, _>("id")?,
                     account_id: account_id.clone(),
-                    name: stmt.read::<String, _>("name").unwrap(),
-                    icon: stmt.read::<Option<String>, _>("icon").unwrap(),
+                    name: stmt.read::<String, _>("name")?,
+                    icon: stmt.read::<Option<String>, _>("icon")?,
                     included_chat_types: serde_json::from_str(
-                        &stmt.read::<String, _>("included_chat_types").unwrap(),
+                        &stmt.read::<String, _>("included_chat_types")?,
                     ).unwrap_or_default(),
                     excluded_chat_types: serde_json::from_str(
-                        &stmt.read::<String, _>("excluded_chat_types").unwrap(),
+                        &stmt.read::<String, _>("excluded_chat_types")?,
                     ).unwrap_or_default(),
                     included_chat_ids: serde_json::from_str(
-                        &stmt.read::<String, _>("included_chat_ids").unwrap(),
+                        &stmt.read::<String, _>("included_chat_ids")?,
                     ).unwrap_or_default(),
                     excluded_chat_ids: serde_json::from_str(
-                        &stmt.read::<String, _>("excluded_chat_ids").unwrap(),
+                        &stmt.read::<String, _>("excluded_chat_ids")?,
                     ).unwrap_or_default(),
-                    sort_order: stmt.read::<i64, _>("sort_order").unwrap() as i32,
+                    sort_order: stmt.read::<i64, _>("sort_order")? as i32,
                 });
             }
             Ok(result)
@@ -204,7 +204,7 @@ impl DataStorage for LocalStorage {
         let folder = folder.clone();
         let account_id = account_id.to_string();
         tokio::task::spawn_blocking(move || {
-            let conn = conn.lock().unwrap();
+            let conn = conn.lock().map_err(|_| anyhow::anyhow!("database mutex poisoned"))?;
             let now = LocalStorage::now_unix();
             let mut stmt = conn.prepare(
                 "INSERT INTO chat_folders (id, account_id, name, icon, included_chat_types, excluded_chat_types, \
@@ -218,20 +218,20 @@ impl DataStorage for LocalStorage {
                  sort_order=excluded.sort_order, updated_at=excluded.updated_at"
             ).context("prepare")?;
 
-            stmt.bind((1, folder.id.as_str())).unwrap();
-            stmt.bind((2, account_id.as_str())).unwrap();
-            stmt.bind((3, folder.name.as_str())).unwrap();
+            stmt.bind((1, folder.id.as_str()))?;
+            stmt.bind((2, account_id.as_str()))?;
+            stmt.bind((3, folder.name.as_str()))?;
             match &folder.icon {
-                Some(icon) => stmt.bind((4, icon.as_str())).unwrap(),
-                None => stmt.bind((4, ())).unwrap(),
+                Some(icon) => stmt.bind((4, icon.as_str()))?,
+                None => stmt.bind((4, ()))?,
             }
-            stmt.bind((5, serde_json::to_string(&folder.included_chat_types).unwrap().as_str())).unwrap();
-            stmt.bind((6, serde_json::to_string(&folder.excluded_chat_types).unwrap().as_str())).unwrap();
-            stmt.bind((7, serde_json::to_string(&folder.included_chat_ids).unwrap().as_str())).unwrap();
-            stmt.bind((8, serde_json::to_string(&folder.excluded_chat_ids).unwrap().as_str())).unwrap();
-            stmt.bind((9, folder.sort_order as i64)).unwrap();
-            stmt.bind((10, now)).unwrap();
-            stmt.bind((11, now)).unwrap();
+            stmt.bind((5, serde_json::to_string(&folder.included_chat_types)?.as_str()))?;
+            stmt.bind((6, serde_json::to_string(&folder.excluded_chat_types)?.as_str()))?;
+            stmt.bind((7, serde_json::to_string(&folder.included_chat_ids)?.as_str()))?;
+            stmt.bind((8, serde_json::to_string(&folder.excluded_chat_ids)?.as_str()))?;
+            stmt.bind((9, folder.sort_order as i64))?;
+            stmt.bind((10, now))?;
+            stmt.bind((11, now))?;
             stmt.next().context("execute")?;
             Ok(())
         })
@@ -244,14 +244,14 @@ impl DataStorage for LocalStorage {
         let id = id.to_string();
         let account_id = account_id.to_string();
         tokio::task::spawn_blocking(move || {
-            let conn = conn.lock().unwrap();
+            let conn = conn.lock().map_err(|_| anyhow::anyhow!("database mutex poisoned"))?;
             let mut stmt = conn.prepare("DELETE FROM chat_folders WHERE id = ? AND account_id = ?").context("prepare")?;
-            stmt.bind((1, id.as_str())).unwrap();
-            stmt.bind((2, account_id.as_str())).unwrap();
+            stmt.bind((1, id.as_str()))?;
+            stmt.bind((2, account_id.as_str()))?;
             stmt.next().context("execute")?;
             let mut stmt2 = conn.prepare("DELETE FROM chat_tabs WHERE id = ? AND account_id = ?").context("prepare")?;
-            stmt2.bind((1, id.as_str())).unwrap();
-            stmt2.bind((2, account_id.as_str())).unwrap();
+            stmt2.bind((1, id.as_str()))?;
+            stmt2.bind((2, account_id.as_str()))?;
             stmt2.next().context("execute")?;
             Ok(())
         })
@@ -263,19 +263,19 @@ impl DataStorage for LocalStorage {
         let conn = Arc::clone(&self.conn);
         let account_id = account_id.to_string();
         tokio::task::spawn_blocking(move || {
-            let conn = conn.lock().unwrap();
+            let conn = conn.lock().map_err(|_| anyhow::anyhow!("database mutex poisoned"))?;
             let mut stmt = conn.prepare(
                 "SELECT id, visible, sort_order FROM chat_tabs WHERE account_id = ? ORDER BY sort_order"
             ).context("prepare")?;
-            stmt.bind((1, account_id.as_str())).unwrap();
+            stmt.bind((1, account_id.as_str()))?;
 
             let mut result = Vec::new();
             while let Ok(sqlite::State::Row) = stmt.next() {
                 result.push(TabRecord {
-                    id: stmt.read::<String, _>("id").unwrap(),
+                    id: stmt.read::<String, _>("id")?,
                     account_id: account_id.clone(),
-                    visible: stmt.read::<i64, _>("visible").unwrap() != 0,
-                    sort_order: stmt.read::<i64, _>("sort_order").unwrap() as i32,
+                    visible: stmt.read::<i64, _>("visible")? != 0,
+                    sort_order: stmt.read::<i64, _>("sort_order")? as i32,
                 });
             }
             Ok(result)
@@ -289,18 +289,18 @@ impl DataStorage for LocalStorage {
         let tabs = tabs.to_vec();
         let account_id = account_id.to_string();
         tokio::task::spawn_blocking(move || {
-            let conn = conn.lock().unwrap();
+            let conn = conn.lock().map_err(|_| anyhow::anyhow!("database mutex poisoned"))?;
             let mut del_stmt = conn.prepare("DELETE FROM chat_tabs WHERE account_id = ?").context("clear")?;
-            del_stmt.bind((1, account_id.as_str())).unwrap();
+            del_stmt.bind((1, account_id.as_str()))?;
             del_stmt.next().context("execute delete")?;
             for tab in &tabs {
                 let mut stmt = conn.prepare(
                     "INSERT INTO chat_tabs (id, account_id, visible, sort_order) VALUES (?, ?, ?, ?)"
                 ).context("prepare")?;
-                stmt.bind((1, tab.id.as_str())).unwrap();
-                stmt.bind((2, account_id.as_str())).unwrap();
-                stmt.bind((3, if tab.visible { 1i64 } else { 0i64 })).unwrap();
-                stmt.bind((4, tab.sort_order as i64)).unwrap();
+                stmt.bind((1, tab.id.as_str()))?;
+                stmt.bind((2, account_id.as_str()))?;
+                stmt.bind((3, if tab.visible { 1i64 } else { 0i64 }))?;
+                stmt.bind((4, tab.sort_order as i64))?;
                 stmt.next().context("execute")?;
             }
             Ok(())
