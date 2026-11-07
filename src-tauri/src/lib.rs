@@ -1,6 +1,5 @@
 //! Telegram client application
 
-mod database;
 mod events;
 mod storage;
 // pub: integration tests drive commands::local_api::spawn_local_api.

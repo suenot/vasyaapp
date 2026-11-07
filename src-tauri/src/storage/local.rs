@@ -1,6 +1,6 @@
 //! Local SQLite storage implementation
 //!
-//! Wraps the existing Database module to implement the DataStorage trait.
+//! Implements the DataStorage trait on top of a local SQLite file.
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 
 use super::{ChatRecord, DataStorage, FolderRecord, TabRecord};
 
-/// Local SQLite storage — wraps the existing database logic
+/// Local SQLite storage
 pub struct LocalStorage {
     conn: Arc<Mutex<Connection>>,
 }
