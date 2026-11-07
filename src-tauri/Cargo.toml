@@ -98,3 +98,9 @@ axum = "0.8"
 
 [dev-dependencies]
 tempfile = "3"
+
+# Upstream grammers-session 0.8.0 has an impossible range check for
+# new-style channel ids (peer.rs, PeerId::kind) that hits `unreachable!()`.
+# Patched copy lives in vendor/; drop once upgraded past the fix.
+[patch.crates-io]
+grammers-session = { path = "vendor/grammers-session" }
