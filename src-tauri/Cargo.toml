@@ -104,3 +104,8 @@ tempfile = "3"
 # Patched copy lives in vendor/; drop once upgraded past the fix.
 [patch.crates-io]
 grammers-session = { path = "vendor/grammers-session" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Already in the tree via notify-rust; used directly because tauri-plugin-notification
+# cannot report clicks on desktop.
+mac-notification-sys = "0.6"

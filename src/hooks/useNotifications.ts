@@ -16,6 +16,7 @@ import {
   sendNotification,
 } from '@tauri-apps/plugin-notification';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 import { useTauriEvent } from './useTauriEvent';
 import { useMuteStore } from '../store/muteStore';
 import { useSettingsStore } from '../store/settingsStore';
@@ -132,7 +133,17 @@ export function useNotifications(selectedChatId: number | null) {
 
     // When notification sound is disabled, send a silent notification
     if (isNative) {
-      sendNotification({ title, body, silent: !notificationSoundRef.current });
+      const silent = !notificationSoundRef.current;
+      // The native command reports clicks (-> opens the chat). It returns
+      // false on platforms without click support, so fall back to the plugin.
+      const handled = await tauriInvoke<boolean>('show_chat_notification', {
+        accountId: evt.accountId,
+        chatId: evt.chatId,
+        title,
+        body,
+        silent,
+      }).catch(() => false);
+      if (!handled) sendNotification({ title, body, silent });
     } else {
       new Notification(title, { body, silent: !notificationSoundRef.current });
     }

@@ -546,6 +546,14 @@ export const MainLayout = () => {
     clearUnreadCount(chatId);
   }, [clearUnreadCount]);
 
+  // System notification clicked: switch to its account and open the chat.
+  useTauriEvent<{ accountId: string; chatId: number }>('notification-clicked', useCallback((evt) => {
+    const accounts = useAccountsStore.getState();
+    if (accounts.activeAccountId !== evt.accountId) accounts.setActiveAccount(evt.accountId);
+    setShowSettings(false);
+    handleChatClick(evt.chatId);
+  }, [handleChatClick]));
+
   const toggleFavorite = useCallback((chatId: number) => {
     setFavorites((prev) => {
       const next = new Set(prev);
