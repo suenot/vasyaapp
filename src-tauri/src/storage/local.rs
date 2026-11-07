@@ -15,9 +15,22 @@ pub struct LocalStorage {
     conn: Arc<Mutex<Connection>>,
 }
 
+/// The cache holds message history in plaintext, so keep it owner-only.
+#[cfg(unix)]
+fn restrict_permissions(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    if let Err(e) = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)) {
+        tracing::warn!(error = %e, "Failed to restrict database file permissions");
+    }
+}
+
+#[cfg(not(unix))]
+fn restrict_permissions(_path: &Path) {}
+
 impl LocalStorage {
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let conn = sqlite::open(path).context("Failed to open database")?;
+        let conn = sqlite::open(path.as_ref()).context("Failed to open database")?;
+        restrict_permissions(path.as_ref());
         let storage = LocalStorage {
             conn: Arc::new(Mutex::new(conn)),
         };
