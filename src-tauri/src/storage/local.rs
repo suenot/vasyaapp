@@ -15,9 +15,6 @@ pub struct LocalStorage {
     conn: Arc<Mutex<Connection>>,
 }
 
-unsafe impl Send for LocalStorage {}
-unsafe impl Sync for LocalStorage {}
-
 impl LocalStorage {
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
         let conn = sqlite::open(path).context("Failed to open database")?;
