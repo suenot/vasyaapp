@@ -56,6 +56,9 @@ export const MainLayout = () => {
     return saved ? new Set(JSON.parse(saved)) : new Set();
   });
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; chatId: number } | null>(null);
+  // Chat awaiting "leave / delete" confirmation from the context menu.
+  const [leaveTarget, setLeaveTarget] = useState<{ id: number; title: string } | null>(null);
+  const [leaveError, setLeaveError] = useState('');
   const [highlightedMessageId, setHighlightedMessageId] = useState<number | null>(null);
   const [showChatInfo, setShowChatInfo] = useState(false);
   const [isSearchExpanded, setIsSearchExpanded] = useState(false);
@@ -1039,12 +1042,44 @@ export const MainLayout = () => {
               isFavorite={favorites.has(contextMenu.chatId)}
               onToggleFavorite={toggleFavorite}
               onMarkAsRead={(id) => { markChatAsRead(id); }}
-              onDelete={(id) => { void id; }}
+              onDelete={(id) => { setLeaveError(''); setLeaveTarget({ id, title: chat?.title ?? '' }); }}
               onClose={closeContextMenu}
             />
           );
         })()
       }
+      {leaveTarget && (
+        <div className="confirm-dialog-overlay" onClick={() => setLeaveTarget(null)}>
+          <div className="confirm-dialog" onClick={(e) => e.stopPropagation()}>
+            <h3>{t('delete_and_leave')}</h3>
+            <p>{leaveTarget.title ? `${leaveTarget.title}: ` : ''}{t('delete_confirm')}</p>
+            {leaveError && <p style={{ color: '#e74c3c' }}>{leaveError}</p>}
+            <div className="confirm-dialog-actions">
+              <button className="confirm-dialog-btn cancel" onClick={() => setLeaveTarget(null)}>
+                {t('cancel')}
+              </button>
+              <button className="confirm-dialog-btn danger" onClick={async () => {
+                if (!activeAccount) return;
+                const { id } = leaveTarget;
+                try {
+                  await invoke('delete_and_leave_chat', { accountId: activeAccount.id, chatId: id });
+                  setChats((prev) => {
+                    const next = prev.filter((c) => c.id !== id);
+                    setCachedChats(activeAccount.id, next);
+                    return next;
+                  });
+                  setSelectedChatId((cur) => (cur === id ? null : cur));
+                  setLeaveTarget(null);
+                } catch (err) {
+                  setLeaveError(String(err));
+                }
+              }}>
+                {t('delete_and_leave')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div >
   );
 };
