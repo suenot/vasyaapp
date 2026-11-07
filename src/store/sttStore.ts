@@ -71,11 +71,6 @@ export const useSttStore = create<SttState>((set, get) => ({
   loadSettings: async () => {
     try {
       const settings = await invoke<SttSettings>('get_stt_settings');
-      console.log('[STT] Settings loaded:', {
-        provider: settings.provider,
-        hasApiKey: !!settings.deepgram_api_key,
-        language: settings.language,
-      });
       set({ settings });
     } catch (err) {
       console.error('[STT] Failed to load settings:', err);
@@ -132,16 +127,10 @@ export const useSttStore = create<SttState>((set, get) => ({
     set({ transcribing: new Set(TRANSCRIBING_SET) });
 
     try {
-      console.log('[STT] Calling transcribe_audio command...', { chatId, messageId, filePath });
       const result = await invoke<{ text: string; language: string | null; cached: boolean }>(
         'transcribe_audio',
         { chatId, messageId, filePath }
       );
-      console.log('[STT] Transcription result:', {
-        textLength: result.text.length,
-        cached: result.cached,
-        preview: result.text.substring(0, 100),
-      });
       TRANSCRIBING_SET.delete(key);
       set((state) => ({
         transcriptions: { ...state.transcriptions, [key]: result.text },

@@ -18,7 +18,6 @@ export const ProfileSettings = ({ onClose }: ProfileSettingsProps) => {
   const [username, setUsername] = useState(activeAccount?.userInfo?.username || '');
 
   const handleSave = () => {
-    console.log('Saving profile:', { firstName, lastName, bio, username });
     onClose();
   };
 

@@ -705,7 +705,6 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(({ ac
 
   const handleContextReply = useCallback((_messageId: number) => {
     // TODO: implement reply
-    console.log('Reply to message:', _messageId);
   }, []);
 
   const handleContextForward = useCallback((messageId: number) => {
@@ -718,17 +717,14 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(({ ac
 
   const handleContextDelete = useCallback((_messageId: number) => {
     // TODO: implement delete
-    console.log('Delete message:', _messageId);
   }, []);
 
   const handleContextPin = useCallback((_messageId: number) => {
     // TODO: implement pin
-    console.log('Pin message:', _messageId);
   }, []);
 
   const handleContextEdit = useCallback((_messageId: number) => {
     // TODO: implement edit
-    console.log('Edit message:', _messageId);
   }, []);
 
   const handleContextCopyText = useCallback((text: string) => {
@@ -758,7 +754,6 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(({ ac
 
   const handleSelectionDelete = useCallback((_ids: number[]) => {
     // TODO: implement bulk delete
-    console.log('Delete messages:', _ids);
     exitSelectionMode();
   }, [exitSelectionMode]);
 

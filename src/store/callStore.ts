@@ -62,7 +62,6 @@ export const useCallStore = create<CallStore>()((set, get) => ({
   networkQuality: 5,
 
   requestCall: async (accountId, userId, peerName, isVideo) => {
-    console.log('[CallStore] requestCall', { accountId, userId, peerName, isVideo });
     try {
       set({ callError: null });
       set({
@@ -83,7 +82,6 @@ export const useCallStore = create<CallStore>()((set, get) => ({
         isVideo,
       });
 
-      console.log('[CallStore] request_call result:', result);
 
       set({
         activeCall: {
@@ -137,7 +135,6 @@ export const useCallStore = create<CallStore>()((set, get) => ({
   discardCall: async (accountId, reason = 'hangup') => {
     const { activeCall, incomingCall } = get();
     const callId = (activeCall?.callId && activeCall.callId !== 0) ? activeCall.callId : incomingCall?.callId;
-    console.log('[CallStore] discardCall', { accountId, callId, activeCallId: activeCall?.callId, incomingCallId: incomingCall?.callId, reason });
 
     // Always clear local state first
     set({
@@ -218,7 +215,6 @@ export const useCallStore = create<CallStore>()((set, get) => ({
   clearCall: () => set({ activeCall: null, incomingCall: null, callError: null, isMuted: false, volume: 1.0, audioLevel: 0, networkQuality: 5 }),
 
   setupListeners: () => {
-    console.log('[CallStore] Setting up call event listeners');
     const unlisteners: Promise<() => void>[] = [];
 
     // Audio level arrives dozens of times per second; coalesce to one store
@@ -229,7 +225,6 @@ export const useCallStore = create<CallStore>()((set, get) => ({
     // Incoming call
     unlisteners.push(
       subscribe<{ callId: number; accessHash: number; userId: number; userName: string; isVideo: boolean; accountId: string }>('telegram:incoming-call', (payload) => {
-        console.log('[CallStore] telegram:incoming-call', payload);
         // Calls are experimental (VoIP encryption is a stub). With the flag off
         // we don't surface the incoming-call UI at all — the call keeps ringing
         // on the user's other Telegram clients.
@@ -250,7 +245,6 @@ export const useCallStore = create<CallStore>()((set, get) => ({
     // Call state changed
     unlisteners.push(
       subscribe<{ callId: number; state: string; reason?: string; gB?: number[]; accountId: string }>('telegram:call-state-changed', (payload) => {
-        console.log('[CallStore] telegram:call-state-changed', payload);
         const { activeCall } = get();
         const stateMap: Record<string, CallStateEnum> = {
           waiting: 'waiting',

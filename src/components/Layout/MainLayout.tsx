@@ -1039,7 +1039,7 @@ export const MainLayout = () => {
               isFavorite={favorites.has(contextMenu.chatId)}
               onToggleFavorite={toggleFavorite}
               onMarkAsRead={(id) => { markChatAsRead(id); }}
-              onDelete={(id) => { console.log('Delete/Leave chat:', id); }}
+              onDelete={(id) => { void id; }}
               onClose={closeContextMenu}
             />
           );
