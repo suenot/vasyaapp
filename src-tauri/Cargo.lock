@@ -1937,6 +1937,7 @@ dependencies = [
 [[package]]
 name = "grammers-session"
 version = "0.8.0"
+source = "git+https://github.com/suenot/vasya-engine?tag=v0.1.0#cd049c86eda55541498794aec634058a10e78c94"
 dependencies = [
  "grammers-tl-gen",
  "grammers-tl-parser",
@@ -6269,9 +6270,9 @@ checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
 [[package]]
 name = "vasya-core"
 version = "0.1.0"
+source = "git+https://github.com/suenot/vasya-engine?tag=v0.1.0#cd049c86eda55541498794aec634058a10e78c94"
 dependencies = [
  "anyhow",
- "axum",
  "chacha20poly1305",
  "grammers-client",
  "grammers-mtsender",
@@ -6286,7 +6287,6 @@ dependencies = [
  "serde_json",
  "sha1",
  "sha2",
- "tempfile",
  "tokio",
  "tracing",
 ]
@@ -6294,6 +6294,7 @@ dependencies = [
 [[package]]
 name = "vasya-server"
 version = "0.1.0"
+source = "git+https://github.com/suenot/vasya-engine?tag=v0.1.0#cd049c86eda55541498794aec634058a10e78c94"
 dependencies = [
  "anyhow",
  "async-graphql",
@@ -6303,14 +6304,12 @@ dependencies = [
  "grammers-client",
  "grammers-session",
  "grammers-tl-types",
- "http-body-util",
  "jsonwebtoken",
  "percent-encoding",
  "rand 0.8.5",
  "serde",
  "serde_json",
  "sha2",
- "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",

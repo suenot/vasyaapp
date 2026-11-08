@@ -6,10 +6,10 @@
 # (<root>/backend + <root>/app) on the deploy host — see deploy/README.md.
 #
 # The workspace root package is the Tauri app; it is NEVER compiled here —
-# `cargo build -p vasya-server` only builds vasya-server + vasya-core, and
-# cargo neither downloads nor compiles the tauri dependency tree for that.
-# Root src/ is copied solely because cargo must discover every workspace
-# member's targets to load the workspace.
+# `cargo build -p vasya-server` only compiles vasya-server + vasya-core, which
+# come from the vasya-engine git dependency pinned in Cargo.toml/Cargo.lock.
+# Root src/ is copied solely because cargo must discover the root package's
+# targets to load the workspace.
 
 FROM rust:1-slim-bookworm AS builder
 WORKDIR /ws
@@ -22,28 +22,15 @@ ENV CARGO_NET_RETRY=10 \
 # Dependency layer: manifests + skeleton sources so source edits don't
 # invalidate the compiled-dependencies cache (same trick as backend/Dockerfile).
 COPY Cargo.toml Cargo.lock ./
-COPY vasya-core/Cargo.toml vasya-core/Cargo.toml
-COPY vasya-server/Cargo.toml vasya-server/Cargo.toml
-RUN mkdir -p src vasya-core/src vasya-server/src \
+RUN mkdir -p src \
     && echo 'fn main() {}' > src/main.rs \
-    && touch src/lib.rs \
-    && touch vasya-core/src/lib.rs \
-    && echo 'fn main() {}' > vasya-server/src/main.rs \
-    && touch vasya-server/src/lib.rs
+    && touch src/lib.rs
 # Network and compile as separate layers: a flaky registry or an interrupted
 # build resumes from the cached download instead of refetching everything.
 RUN cargo fetch --locked
-RUN cargo build --release --locked --offline -p vasya-server \
-    && rm -rf src vasya-core/src vasya-server/src
-
-COPY src ./src
-COPY vasya-core ./vasya-core
-COPY vasya-server ./vasya-server
-# touch: COPY preserves mtimes from the build context, which may be older than
-# the skeleton build above — without it cargo would reuse the dummy binary.
-RUN touch src/main.rs src/lib.rs vasya-core/src/lib.rs \
-        vasya-server/src/main.rs vasya-server/src/lib.rs \
-    && cargo build --release --locked --offline -p vasya-server
+# vasya-server's sources are fetched from git, so one build is enough: the
+# app's own src/ never affects the vasya-server binary.
+RUN cargo build --release --locked --offline -p vasya-server
 
 FROM debian:bookworm-slim AS runtime
 # curl is used by the container healthcheck and for debugging from inside.

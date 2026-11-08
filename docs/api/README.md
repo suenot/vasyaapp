@@ -34,7 +34,7 @@ TOK="Authorization: Bearer <your-token-or-vk_key>"
 
 Every `/api/v1` route except `/health` and `/openapi.json` requires a
 `Authorization: Bearer <token>` header. There are three credential types,
-resolved by `require_auth` (`vasya-server/src/auth.rs`):
+resolved by `require_auth` (`vasya-engine/crates/vasya-server/src/auth.rs`):
 
 | Type | Who | How it authenticates | Scopes |
 | --- | --- | --- | --- |
@@ -86,8 +86,8 @@ Key creation fields:
 ### Scopes
 
 Authoritative source: `ALL_SCOPES` / `SCOPE_DESCRIPTIONS` in
-`vasya-server/src/agent_keys.rs`; the route→scope mapping is `required_scope`
-in `vasya-server/src/policy.rs`.
+`vasya-engine/crates/vasya-server/src/agent_keys.rs`; the route→scope mapping is `required_scope`
+in `vasya-engine/crates/vasya-server/src/policy.rs`.
 
 | Scope | Grants |
 | --- | --- |
