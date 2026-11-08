@@ -18,6 +18,7 @@ pub mod calls;
 pub mod group_calls;
 pub mod voip_sidecar;
 pub mod local_api;
+pub mod notifications;
 
 pub use auth::*;
 pub use settings::*;

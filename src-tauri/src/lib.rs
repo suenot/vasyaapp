@@ -87,6 +87,7 @@ pub fn run() {
             commands::search_messages,
             commands::get_my_avatar,
             commands::delete_and_leave_chat,
+            commands::notifications::show_chat_notification,
             commands::create_group,
             commands::create_channel,
             commands::get_contacts,
