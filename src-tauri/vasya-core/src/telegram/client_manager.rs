@@ -144,7 +144,9 @@ impl TelegramClientManager {
             .key_provider
             .get_or_create()
             .context("Failed to obtain session encryption key")?;
-        let enc_path = self.sessions_dir.join(format!("{}.session.enc", account_id));
+        let enc_path = self
+            .sessions_dir
+            .join(format!("{}.session.enc", account_id));
         let legacy_path = self.sessions_dir.join(format!("{}.session", account_id));
 
         if enc_path.exists() {
@@ -175,7 +177,7 @@ impl TelegramClientManager {
     }
 
     /// Get the current API ID
-    /// Share the existing per-profile/server encryption key with secret settings stores.
+    /// Share the per-profile encryption key with write-only secret settings stores.
     pub fn master_key_provider(&self) -> Arc<dyn MasterKeyProvider> {
         self.key_provider.clone()
     }
@@ -202,7 +204,8 @@ impl TelegramClientManager {
         phone: String,
     ) -> Result<Arc<TelegramClientWrapper>> {
         let api_id = self.api_id();
-        self.create_client_with_api_id(account_id, phone, api_id).await
+        self.create_client_with_api_id(account_id, phone, api_id)
+            .await
     }
 
     /// Like [`create_client`] but with an explicit `api_id` for the SenderPool,
@@ -247,7 +250,10 @@ impl TelegramClientManager {
             peers: Arc::new(RwLock::new(HashMap::new())),
         });
 
-        self.clients.write().await.insert(account_id.clone(), wrapper.clone());
+        self.clients
+            .write()
+            .await
+            .insert(account_id.clone(), wrapper.clone());
         Ok(wrapper)
     }
 
@@ -272,10 +278,9 @@ impl TelegramClientManager {
             .context("Updates receiver not found (already consumed or never created)")?;
 
         // Create the UpdateStream from client + receiver
-        let update_stream = wrapper.client.stream_updates(
-            updates_rx,
-            UpdatesConfiguration::default(),
-        );
+        let update_stream = wrapper
+            .client
+            .stream_updates(updates_rx, UpdatesConfiguration::default());
 
         // Create shutdown channel
         let (shutdown_tx, shutdown_rx) = updates::shutdown_channel();
@@ -333,30 +338,33 @@ impl TelegramClientManager {
     }
 
     pub async fn remove_client(&self, account_id: &str) -> Result<()> {
-        // Stop updates first
+        anyhow::ensure!(
+            !account_id.is_empty()
+                && account_id
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'),
+            "Invalid account ID"
+        );
+        // Fence all persistence before shutdown: retained SenderPool/session Arcs
+        // can otherwise flush a dirty snapshot after the session file is deleted.
+        if let Some(session) = self.sessions.write().await.remove(account_id) {
+            session.disable_persistence();
+        }
         self.stop_updates(account_id).await;
-
-        // Clean up any unused updates receiver
         self.updates_receivers.write().await.remove(account_id);
-
-        self.sessions.write().await.remove(account_id);
-
-        let mut clients = self.clients.write().await;
-        if let Some(wrapper) = clients.remove(account_id) {
+        if let Some(wrapper) = self.clients.write().await.remove(account_id) {
             wrapper.client.disconnect();
-
-            for name in [
-                format!("{}.session", account_id),
-                format!("{}.session.enc", account_id),
-            ] {
-                let session_path = self.sessions_dir.join(name);
-                if session_path.exists() {
-                    std::fs::remove_file(session_path)
-                        .context("Failed to remove session file")?;
-                }
+        }
+        for name in [
+            format!("{}.session", account_id),
+            format!("{}.session.enc", account_id),
+        ] {
+            match std::fs::remove_file(self.sessions_dir.join(name)) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e).context("Failed to remove session file"),
             }
         }
-
         Ok(())
     }
 
@@ -390,8 +398,8 @@ impl TelegramClientManager {
             return Ok(loaded);
         }
 
-        let entries = std::fs::read_dir(&self.sessions_dir)
-            .context("Failed to read sessions directory")?;
+        let entries =
+            std::fs::read_dir(&self.sessions_dir).context("Failed to read sessions directory")?;
 
         // Collect unique account ids from both storage formats: encrypted
         // (`<id>.session.enc`) and legacy plaintext (`<id>.session`, migrated
@@ -454,7 +462,10 @@ impl TelegramClientManager {
                 peers: Arc::new(RwLock::new(HashMap::new())),
             });
 
-            self.clients.write().await.insert(account_id.clone(), wrapper);
+            self.clients
+                .write()
+                .await
+                .insert(account_id.clone(), wrapper);
             loaded.push(account_id);
         }
 

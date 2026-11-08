@@ -92,7 +92,12 @@ struct StoredUpdates {
 
 fn peer_to_stored(peer: &PeerInfo) -> StoredPeer {
     match peer {
-        PeerInfo::User { id, auth, bot, is_self } => StoredPeer::User {
+        PeerInfo::User {
+            id,
+            auth,
+            bot,
+            is_self,
+        } => StoredPeer::User {
             id: *id,
             auth: auth.map(|a| a.hash()),
             bot: *bot,
@@ -113,7 +118,12 @@ fn peer_to_stored(peer: &PeerInfo) -> StoredPeer {
 
 fn stored_to_peer(peer: &StoredPeer) -> PeerInfo {
     match peer {
-        StoredPeer::User { id, auth, bot, is_self } => PeerInfo::User {
+        StoredPeer::User {
+            id,
+            auth,
+            bot,
+            is_self,
+        } => PeerInfo::User {
             id: *id,
             auth: auth.map(PeerAuth::from_hash),
             bot: *bot,
@@ -141,6 +151,7 @@ struct State {
     peers: HashMap<PeerId, PeerInfo>,
     updates: UpdatesState,
     dirty: bool,
+    persistence_disabled: bool,
     last_save: Instant,
 }
 
@@ -155,7 +166,8 @@ impl EncryptedSession {
     /// and writing the first encrypted snapshot right away.
     pub fn create(path: &Path, key: &[u8; 32], data: SessionData) -> Result<Self> {
         let this = Self::from_data(path, key, data);
-        this.save_now().context("Failed to write initial encrypted session")?;
+        this.save_now()
+            .context("Failed to write initial encrypted session")?;
         Ok(this)
     }
 
@@ -173,7 +185,10 @@ impl EncryptedSession {
         let stored: StoredSession =
             serde_json::from_slice(&plaintext).context("Failed to parse decrypted session")?;
         if stored.version != FORMAT_VERSION {
-            return Err(anyhow!("Unsupported session format version {}", stored.version));
+            return Err(anyhow!(
+                "Unsupported session format version {}",
+                stored.version
+            ));
         }
 
         // Start from defaults so statically-known DC options are present,
@@ -224,6 +239,7 @@ impl EncryptedSession {
                 peers: data.peer_infos,
                 updates: data.updates_state,
                 dirty: false,
+                persistence_disabled: false,
                 last_save: Instant::now(),
             }),
             path: path.to_path_buf(),
@@ -233,6 +249,9 @@ impl EncryptedSession {
 
     /// Serializes + encrypts the current state and writes it atomically.
     fn save_locked(&self, state: &mut State) -> Result<()> {
+        if state.persistence_disabled {
+            return Ok(());
+        }
         let stored = StoredSession {
             version: FORMAT_VERSION,
             home_dc: state.home_dc,
@@ -252,7 +271,12 @@ impl EncryptedSession {
                 qts: state.updates.qts,
                 date: state.updates.date,
                 seq: state.updates.seq,
-                channels: state.updates.channels.iter().map(|c| (c.id, c.pts)).collect(),
+                channels: state
+                    .updates
+                    .channels
+                    .iter()
+                    .map(|c| (c.id, c.pts))
+                    .collect(),
             },
         };
 
@@ -301,6 +325,15 @@ impl EncryptedSession {
         }
     }
 
+    /// Irreversibly stop this instance from writing after logout. SenderPool and
+    /// in-flight operations may retain Arc clones after the manager removes it.
+    /// The state mutex fences an already-running save before the caller unlinks.
+    pub fn disable_persistence(&self) {
+        let mut state = self.state.lock().unwrap();
+        state.persistence_disabled = true;
+        state.dirty = false;
+    }
+
     /// Flush pending changes to disk (call on shutdown/disconnect).
     pub fn flush(&self) -> Result<()> {
         let mut state = self.state.lock().unwrap();
@@ -347,7 +380,15 @@ impl Session for EncryptedSession {
             return state
                 .peers
                 .values()
-                .find(|p| matches!(p, PeerInfo::User { is_self: Some(true), .. }))
+                .find(|p| {
+                    matches!(
+                        p,
+                        PeerInfo::User {
+                            is_self: Some(true),
+                            ..
+                        }
+                    )
+                })
                 .cloned();
         }
         state.peers.get(&peer).cloned()
@@ -355,7 +396,13 @@ impl Session for EncryptedSession {
 
     fn cache_peer(&self, peer: &PeerInfo) {
         let mut state = self.state.lock().unwrap();
-        let is_self = matches!(peer, PeerInfo::User { is_self: Some(true), .. });
+        let is_self = matches!(
+            peer,
+            PeerInfo::User {
+                is_self: Some(true),
+                ..
+            }
+        );
         state.peers.insert(peer.id(), peer.clone());
         if is_self {
             // Knowing "who am I" is what marks the session as logged-in.
@@ -414,18 +461,57 @@ mod tests {
             bot: Some(false),
             is_self: Some(true),
         });
-        session.set_update_state(UpdateState::Primary { pts: 10, date: 20, seq: 30 });
+        session.set_update_state(UpdateState::Primary {
+            pts: 10,
+            date: 20,
+            seq: 30,
+        });
         session.flush().unwrap();
         drop(session);
 
         let restored = EncryptedSession::load(&path, &test_key()).unwrap();
         assert_eq!(restored.home_dc_id(), 4);
-        let me = restored.peer(PeerId::self_user()).expect("self peer survives restart");
+        let me = restored
+            .peer(PeerId::self_user())
+            .expect("self peer survives restart");
         assert!(matches!(me, PeerInfo::User { id: 12345, .. }));
         let updates = restored.updates_state();
         assert_eq!((updates.pts, updates.date, updates.seq), (10, 20, 30));
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn logged_out_session_cannot_be_recreated_by_late_save_or_drop() {
+        let dir = std::env::temp_dir().join(format!("enc-session-logout-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("acc.session.enc");
+        let session = std::sync::Arc::new(
+            EncryptedSession::create(&path, &test_key(), SessionData::default()).unwrap(),
+        );
+        let late = session.clone();
+        session.set_update_state(UpdateState::Primary {
+            pts: 10,
+            date: 20,
+            seq: 30,
+        });
+        session.disable_persistence();
+        std::fs::remove_file(&path).unwrap();
+        drop(session);
+        late.set_home_dc_id(4); // eager save after logout must not recreate the file
+        late.set_update_state(UpdateState::Primary {
+            pts: 20,
+            date: 30,
+            seq: 40,
+        });
+        late.flush().unwrap();
+        assert!(!path.exists());
+        drop(late);
+        assert!(
+            !path.exists(),
+            "last Arc drop recreated logged-out credentials"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
