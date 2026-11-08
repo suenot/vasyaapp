@@ -1937,7 +1937,7 @@ dependencies = [
 [[package]]
 name = "grammers-session"
 version = "0.8.0"
-source = "git+https://github.com/suenot/vasya-engine?tag=v0.1.0#cd049c86eda55541498794aec634058a10e78c94"
+source = "git+https://github.com/suenot/vasya-engine?tag=v0.2.0#d344edf4bd01b5c33029fd26e7d03701476e6b3b"
 dependencies = [
  "grammers-tl-gen",
  "grammers-tl-parser",
@@ -6268,9 +6268,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
 
 [[package]]
+name = "vasya-channel"
+version = "0.1.0"
+source = "git+https://github.com/suenot/vasya-engine?tag=v0.2.0#d344edf4bd01b5c33029fd26e7d03701476e6b3b"
+dependencies = [
+ "async-trait",
+ "bitflags 2.11.0",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "vasya-core"
 version = "0.1.0"
-source = "git+https://github.com/suenot/vasya-engine?tag=v0.1.0#cd049c86eda55541498794aec634058a10e78c94"
+source = "git+https://github.com/suenot/vasya-engine?tag=v0.2.0#d344edf4bd01b5c33029fd26e7d03701476e6b3b"
 dependencies = [
  "anyhow",
  "chacha20poly1305",
@@ -6294,11 +6306,12 @@ dependencies = [
 [[package]]
 name = "vasya-server"
 version = "0.1.0"
-source = "git+https://github.com/suenot/vasya-engine?tag=v0.1.0#cd049c86eda55541498794aec634058a10e78c94"
+source = "git+https://github.com/suenot/vasya-engine?tag=v0.2.0#d344edf4bd01b5c33029fd26e7d03701476e6b3b"
 dependencies = [
  "anyhow",
  "async-graphql",
  "async-graphql-axum",
+ "async-trait",
  "axum",
  "chrono",
  "grammers-client",
@@ -6318,6 +6331,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "vasya-channel",
  "vasya-core",
 ]
 

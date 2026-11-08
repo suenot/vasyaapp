@@ -30,7 +30,7 @@ tauri-plugin-shell = "2"
 tauri-plugin-fs = "2"
 
 # Telegram engine (Tauri-free), shared with vasyaapp-native via vasya-engine
-vasya-core = { git = "https://github.com/suenot/vasya-engine", tag = "v0.1.0" }
+vasya-core = { git = "https://github.com/suenot/vasya-engine", tag = "v0.2.0" }
 grammers-client = "0.8"
 grammers-session = "0.8"
 grammers-mtsender = "0.8"
@@ -92,7 +92,7 @@ rand = "0.8"
 # Embedded local API server (desktop only; keeps iOS/Android builds lean).
 # Cargo.toml can't use tauri's `desktop` cfg alias, so spell the target out.
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
-vasya-server = { git = "https://github.com/suenot/vasya-engine", tag = "v0.1.0" }
+vasya-server = { git = "https://github.com/suenot/vasya-engine", tag = "v0.2.0" }
 axum = "0.8"
 
 [dev-dependencies]
@@ -102,7 +102,7 @@ tempfile = "3"
 # new-style channel ids (peer.rs, PeerId::kind) that hits `unreachable!()`.
 # Patched copy lives in vasya-engine/vendor; drop once upgraded past the fix.
 [patch.crates-io]
-grammers-session = { git = "https://github.com/suenot/vasya-engine", tag = "v0.1.0" }
+grammers-session = { git = "https://github.com/suenot/vasya-engine", tag = "v0.2.0" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Already in the tree via notify-rust; used directly because tauri-plugin-notification
