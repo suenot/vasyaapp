@@ -71,6 +71,24 @@ export const ru: Record<TranslationKey, string> = {
   delete_and_leave: 'Удалить и выйти',
   delete_confirm: 'Вы уверены, что хотите удалить этот чат и выйти? Это действие нельзя отменить.',
 
+  // Bulk leave
+  bulk_select: 'Выбрать чаты',
+  bulk_selected: 'Выбрано: {n}',
+  bulk_all_channels: 'Все каналы ({n})',
+  bulk_all_groups_channels: 'Каналы и группы ({n})',
+  bulk_clear: 'Сбросить',
+  bulk_leave: 'Выйти из {n}',
+  bulk_confirm_title: 'Выйти из чатов: {n}?',
+  bulk_confirm_note: 'Вы выйдете из всех. Отменить нельзя.',
+  bulk_running: 'Выход: {done} из {n}',
+  bulk_waiting: 'Telegram просит подождать: {s} с',
+  bulk_stop: 'Остановить',
+  bulk_done: 'Вышли из {ok} из {n}',
+  bulk_retry: 'Повторить для {n}',
+  bulk_close: 'Закрыть',
+  bulk_flood: 'Лимит Telegram, попробуйте позже',
+  bulk_context_select: 'Выбрать',
+
   // New Chat
   new_chat: 'Новый чат',
   new_group: 'Новая группа',

@@ -69,6 +69,24 @@ export const en = {
   delete_and_leave: 'Delete and Leave',
   delete_confirm: 'Are you sure you want to delete this chat and leave? This action cannot be undone.',
 
+  // Bulk leave
+  bulk_select: 'Select chats',
+  bulk_selected: '{n} selected',
+  bulk_all_channels: 'All channels ({n})',
+  bulk_all_groups_channels: 'Channels and groups ({n})',
+  bulk_clear: 'Clear',
+  bulk_leave: 'Leave {n}',
+  bulk_confirm_title: 'Leave {n} chats?',
+  bulk_confirm_note: 'You will leave all of them. This cannot be undone.',
+  bulk_running: 'Leaving {done} of {n}',
+  bulk_waiting: 'Telegram asked to wait: {s} s',
+  bulk_stop: 'Stop',
+  bulk_done: 'Left {ok} of {n}',
+  bulk_retry: 'Retry {n} failed',
+  bulk_close: 'Close',
+  bulk_flood: 'Telegram rate limit, try again later',
+  bulk_context_select: 'Select',
+
   // New Chat
   new_chat: 'New Chat',
   new_group: 'New Group',

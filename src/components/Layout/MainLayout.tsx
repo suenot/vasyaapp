@@ -5,7 +5,7 @@ import { MyQrCode } from '../Profile/MyQrCode';
 import { AccountSwitcher } from '../Accounts/AccountSwitcher';
 import { MessageList, MessageListHandle } from '../Messages/MessageList';
 import { prioritizeChat } from '../../hooks/useMediaQueue';
-import { ChatList, ChatHeader, ChatHeaderHandle, ChatContextMenu, ChatInfoPanel, ChatFilters, TopicList } from '../Chat';
+import { ChatList, ChatHeader, ChatHeaderHandle, ChatContextMenu, ChatInfoPanel, ChatFilters, TopicList, BulkLeaveBar, BulkLeaveDialog } from '../Chat';
 import { NewChatButton } from '../Chat/NewChatButton';
 import { useSettingsStore } from '../../store/settingsStore';
 import { useAccountsStore } from '../../store/accountsStore';
@@ -18,6 +18,7 @@ import { useHotkeysStore } from '../../store/hotkeysStore';
 import { useMuteStore } from '../../store/muteStore';
 import { useSelectionStore } from '../../store/selectionStore';
 import { useFolderStore } from '../../store/folderStore';
+import { useChatSelectionStore } from '../../store/chatSelectionStore';
 import { Chat, ForumTopic, GlobalSearchResult, GlobalMessageResult } from '../../types/telegram';
 import { useTranslation } from '../../i18n';
 import './MainLayout.css';
@@ -59,6 +60,9 @@ export const MainLayout = () => {
   // Chat awaiting "leave / delete" confirmation from the context menu.
   const [leaveTarget, setLeaveTarget] = useState<{ id: number; title: string } | null>(null);
   const [leaveError, setLeaveError] = useState('');
+  // Bulk leave: selection lives in chatSelectionStore; this opens the confirm/progress dialog.
+  const bulkActive = useChatSelectionStore((s) => s.active);
+  const [bulkDialog, setBulkDialog] = useState(false);
   const [highlightedMessageId, setHighlightedMessageId] = useState<number | null>(null);
   const [showChatInfo, setShowChatInfo] = useState(false);
   const [isSearchExpanded, setIsSearchExpanded] = useState(false);
@@ -940,6 +944,18 @@ export const MainLayout = () => {
                 />
               </div>
               {!isSearchExpanded && (
+                <button
+                  className={`icon-button${bulkActive ? ' active' : ''}`}
+                  title={t('bulk_select')}
+                  onClick={() => (bulkActive ? useChatSelectionStore.getState().exit() : useChatSelectionStore.getState().enter())}
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="9 11 12 14 22 4" />
+                    <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+                  </svg>
+                </button>
+              )}
+              {!isSearchExpanded && (
                 <button className="icon-button" title={t('my_qr_code' as any)} onClick={() => setShowMyQr(true)}>
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <rect x="3" y="3" width="7" height="7" rx="1" />
@@ -963,6 +979,7 @@ export const MainLayout = () => {
           {folderLayout === 'horizontal' && (
             <ChatFilters activeFilter={activeFilter} onFilterChange={setActiveFilter} unreadCounts={unreadCounts} onReadAll={handleReadAllFolder} onMuteAll={handleMuteAllFolder} />
           )}
+          {bulkActive && <BulkLeaveBar visibleChats={filteredChats} onLeave={() => setBulkDialog(true)} />}
           <div ref={chatListRef} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
             <ChatList
               chats={filteredChats}
@@ -1051,11 +1068,33 @@ export const MainLayout = () => {
               onToggleFavorite={toggleFavorite}
               onMarkAsRead={(id) => { markChatAsRead(id); }}
               onDelete={(id) => { setLeaveError(''); setLeaveTarget({ id, title: chat?.title ?? '' }); }}
+              onSelect={(id) => useChatSelectionStore.getState().enter(id)}
               onClose={closeContextMenu}
             />
           );
         })()
       }
+      {bulkDialog && activeAccount && (
+        <BulkLeaveDialog
+          accountId={activeAccount.id}
+          chats={chats.filter((c) => useChatSelectionStore.getState().ids.has(c.id))}
+          onLeft={(ids) => {
+            const gone = new Set(ids);
+            setChats((prev) => {
+              const next = prev.filter((c) => !gone.has(c.id));
+              setCachedChats(activeAccount.id, next);
+              return next;
+            });
+            setSelectedChatId((cur) => (cur != null && gone.has(cur) ? null : cur));
+            useChatSelectionStore.getState().remove(ids);
+          }}
+          onClose={() => {
+            setBulkDialog(false);
+            if (useChatSelectionStore.getState().ids.size === 0) useChatSelectionStore.getState().exit();
+          }}
+        />
+      )}
+
       {leaveTarget && (
         <div className="confirm-dialog-overlay" onClick={() => setLeaveTarget(null)}>
           <div className="confirm-dialog" onClick={(e) => e.stopPropagation()}>

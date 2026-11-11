@@ -10,6 +10,11 @@ interface ChatListItemProps {
   isHighlighted?: boolean;
   onChatClick: (chatId: number) => void;
   onContextMenu: (e: React.MouseEvent, chatId: number) => void;
+  /** Bulk-select mode: clicking toggles a checkbox instead of opening the chat. */
+  selectionMode?: boolean;
+  checked?: boolean;
+  selectable?: boolean;
+  onSelectToggle?: (chatId: number, shift: boolean) => void;
 }
 
 export const ChatListItem = memo(({
@@ -19,11 +24,19 @@ export const ChatListItem = memo(({
   isHighlighted,
   onChatClick,
   onContextMenu,
+  selectionMode,
+  checked,
+  selectable = true,
+  onSelectToggle,
 }: ChatListItemProps) => {
   const { t } = useTranslation();
-  const handleClick = useCallback(() => {
+  const handleClick = useCallback((e: React.MouseEvent) => {
+    if (selectionMode) {
+      if (selectable) onSelectToggle?.(chat.id, e.shiftKey);
+      return;
+    }
     onChatClick(chat.id);
-  }, [onChatClick, chat.id]);
+  }, [onChatClick, chat.id, selectionMode, selectable, onSelectToggle]);
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     onContextMenu(e, chat.id);
@@ -34,6 +47,9 @@ export const ChatListItem = memo(({
     isSelected ? 'selected' : '',
     isFavorite ? 'favorite' : '',
     isHighlighted ? 'keyboard-highlighted' : '',
+    selectionMode ? 'selection-mode' : '',
+    selectionMode && checked ? 'checked' : '',
+    selectionMode && !selectable ? 'not-selectable' : '',
   ]
     .filter(Boolean)
     .join(' ');
@@ -44,6 +60,13 @@ export const ChatListItem = memo(({
       onClick={handleClick}
       onContextMenu={handleContextMenu}
     >
+      {selectionMode && (
+        <span className={`chat-select-box${checked ? ' on' : ''}`} aria-checked={!!checked} role="checkbox">
+          {checked && (
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+          )}
+        </span>
+      )}
       <div className="chat-avatar">
         {chat.avatarPath ? (
           <img

@@ -7,3 +7,5 @@ export type { ChatHeaderHandle } from './ChatHeader';
 export { ChatInfoPanel } from './ChatInfoPanel';
 export { ChatList } from './ChatList';
 export { TopicList } from './TopicList';
+export { BulkLeaveBar } from './BulkLeaveBar';
+export { BulkLeaveDialog } from './BulkLeaveDialog';

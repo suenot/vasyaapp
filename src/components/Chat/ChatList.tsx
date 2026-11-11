@@ -4,6 +4,7 @@ import { Chat, GlobalSearchResult, GlobalMessageResult } from '../../types/teleg
 import { ChatListItem } from './ChatListItem';
 import { useTranslation } from '../../i18n';
 import { useSettingsStore } from '../../store/settingsStore';
+import { useChatSelectionStore, isBulkLeavable } from '../../store/chatSelectionStore';
 import './ChatList.css';
 
 interface ChatListProps {
@@ -25,6 +26,7 @@ interface ChatListProps {
   onMessageResultClick?: (result: GlobalMessageResult) => void;
   onShowMoreGlobal?: () => void;
 }
+
 
 function formatDate(timestamp: number): string {
   const date = new Date(timestamp * 1000);
@@ -72,6 +74,15 @@ export const ChatList = memo(({
   const { t } = useTranslation();
   const chatDensity = useSettingsStore((s) => s.chatDensity);
   const isSearchActive = searchQuery.trim().length > 0;
+
+  // Bulk-select mode (checkboxes, shift-range).
+  const selectionMode = useChatSelectionStore((s) => s.active);
+  const selectedIds = useChatSelectionStore((s) => s.ids);
+  const onSelectToggle = (id: number, shift: boolean) => {
+    const st = useChatSelectionStore.getState();
+    if (shift) st.rangeTo(chats.filter((c) => isBulkLeavable(c.chatType)).map((c) => c.id), id);
+    else st.toggle(id);
+  };
 
   // Virtualize the (potentially huge) normal chat list so only visible rows are
   // in the DOM. Heights are measured per-row (measureElement) since density and
@@ -126,6 +137,10 @@ export const ChatList = memo(({
                     isHighlighted={highlightedIndex === index}
                     onChatClick={onChatClick}
                     onContextMenu={onContextMenu}
+                    selectionMode={selectionMode}
+                    checked={selectedIds.has(chat.id)}
+                    selectable={isBulkLeavable(chat.chatType)}
+                    onSelectToggle={onSelectToggle}
                   />
                 ))}
               </div>
@@ -297,6 +312,10 @@ export const ChatList = memo(({
                     isHighlighted={highlightedIndex === vi.index}
                     onChatClick={onChatClick}
                     onContextMenu={onContextMenu}
+                    selectionMode={selectionMode}
+                    checked={selectedIds.has(chat.id)}
+                    selectable={isBulkLeavable(chat.chatType)}
+                    onSelectToggle={onSelectToggle}
                   />
                 </div>
               );

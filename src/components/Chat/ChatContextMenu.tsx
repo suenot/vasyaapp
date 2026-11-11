@@ -15,6 +15,8 @@ interface ChatContextMenuProps {
   onToggleFavorite: (chatId: number) => void;
   onMarkAsRead?: (chatId: number) => void;
   onDelete?: (chatId: number) => void;
+  /** Enter bulk-select mode with this chat checked (channels and groups only). */
+  onSelect?: (chatId: number) => void;
   onClose: () => void;
 }
 
@@ -24,7 +26,7 @@ const VIEWPORT_PADDING = 8;
 export const ChatContextMenu = ({
   x, y, chatId, chatType, chatTitle: _chatTitle, unreadCount,
   isFavorite, isPinned,
-  onToggleFavorite, onMarkAsRead, onDelete, onClose,
+  onToggleFavorite, onMarkAsRead, onDelete, onSelect, onClose,
 }: ChatContextMenuProps) => {
   const { t } = useTranslation();
   const [showFolders, setShowFolders] = useState(false);
@@ -212,6 +214,19 @@ export const ChatContextMenu = ({
 
       {/* Divider before destructive action */}
       <div className="context-menu-divider" />
+
+      {onSelect && (isChannel || isGroup) && (
+        <button
+          className="context-menu-item"
+          onClick={() => { onSelect(chatId); onClose(); }}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="9 11 12 14 22 4" />
+            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+          </svg>
+          {t('bulk_context_select')}
+        </button>
+      )}
 
       {/* Leave / Delete */}
       <button

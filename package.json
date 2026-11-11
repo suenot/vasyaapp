@@ -11,6 +11,7 @@
     "tauri": "tauri",
     "version:sync": "node scripts/sync-version.mjs --write",
     "prebuild": "node scripts/sync-version.mjs",
+    "test:selection": "node --experimental-strip-types --test scripts/chat-selection.test.mjs",
     "test:translation": "node --experimental-strip-types --test scripts/translation-runtime.test.mjs"
   },
   "dependencies": {

@@ -110,3 +110,58 @@
 .show-more-btn:hover {
   background: var(--sidebar-hover);
 }
+
+/* Bulk select */
+.chat-item.selection-mode { cursor: pointer; }
+.chat-item.not-selectable { opacity: 0.45; cursor: not-allowed; }
+.chat-item.checked { background: var(--sidebar-hover); }
+.chat-select-box {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin-right: 10px;
+  align-self: center;
+  border: 2px solid var(--border-color);
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  transition: background 0.12s, border-color 0.12s;
+}
+.chat-select-box.on { background: var(--accent-color, #3390ec); border-color: var(--accent-color, #3390ec); }
+.not-selectable .chat-select-box { visibility: hidden; }
+
+.bulk-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+.bulk-bar-top { display: flex; justify-content: space-between; align-items: center; }
+.bulk-bar-count { font-weight: 600; color: var(--text-primary); }
+.bulk-bar-link { background: none; border: none; color: var(--accent-color, #3390ec); cursor: pointer; font-size: 13px; }
+.bulk-bar-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.bulk-bar-chip {
+  padding: 4px 10px;
+  border-radius: 14px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+}
+.bulk-bar-chip:disabled, .bulk-bar-leave:disabled { opacity: 0.4; cursor: default; }
+.bulk-bar-leave {
+  padding: 8px;
+  border: none;
+  border-radius: 8px;
+  background: #e53935;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+.bulk-progress { height: 6px; border-radius: 3px; background: var(--bg-secondary); overflow: hidden; margin-bottom: 12px; }
+.bulk-progress > div { height: 100%; background: #e53935; transition: width 0.2s; }
+.bulk-failures { max-height: 200px; overflow: auto; margin: 0 0 16px; padding-left: 18px; font-size: 13px; color: var(--text-secondary); }
