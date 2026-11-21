@@ -18,6 +18,12 @@
 - **Per-account allowlist on agent keys.** Pass `accountIds` when creating a key (`POST /api/v1/agent-keys`) to restrict it to specific accounts; a `/accounts/{acc}/…` request that already clears its required scope but targets an account outside the list returns 403 `account not in key allowlist`. Omitted/empty = all the owner's accounts (unchanged). The allowlist is reflected in `GET /api/v1/agent-keys`. The allowlist is also enforced for `POST /api/v1/stt/transcribe` when it targets an account via its JSON body.
 - **Storage-mode over REST (no longer a 501 stub).** `GET /api/v1/storage-mode` reports the server's fixed storage mode (`{mode:"server", configurable:false, reason}`) and `PUT /api/v1/storage-mode` returns `400` — the server always persists state server-side, so the desktop-only `local`/`remote` toggle does not apply. (Mirrors the STT "structured response instead of 501" pattern.)
 
+## [0.10.0] - 2026-11-21
+
+### Added
+
+- Sign in to Telegram on desktop or web by scanning a QR code from Telegram's Devices screen. The code refreshes automatically and supports two-step verification.
+
 ## [0.9.0] - 2026-09-19
 
 ### Added

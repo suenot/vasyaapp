@@ -2044,7 +2044,7 @@ dependencies = [
 [[package]]
 name = "grammers-session"
 version = "0.8.0"
-source = "git+https://github.com/suenot/vasya-engine?tag=v0.3.0#be7c68511d7a9afcae081bb80357f4b8c13b4c8b"
+source = "git+https://github.com/suenot/vasya-engine?tag=v0.4.0#29f280be6630976c8389f1762cea483daa54c0f9"
 dependencies = [
  "grammers-tl-gen",
  "grammers-tl-parser",
@@ -5747,7 +5747,7 @@ dependencies = [
 
 [[package]]
 name = "telegram-client"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6483,7 +6483,7 @@ checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
 [[package]]
 name = "vasya-channel"
 version = "0.1.0"
-source = "git+https://github.com/suenot/vasya-engine?tag=v0.3.0#be7c68511d7a9afcae081bb80357f4b8c13b4c8b"
+source = "git+https://github.com/suenot/vasya-engine?tag=v0.4.0#29f280be6630976c8389f1762cea483daa54c0f9"
 dependencies = [
  "async-trait",
  "bitflags 2.11.0",
@@ -6494,8 +6494,8 @@ dependencies = [
 
 [[package]]
 name = "vasya-channel-email"
-version = "0.2.0"
-source = "git+https://github.com/suenot/vasya-engine?tag=v0.3.0#be7c68511d7a9afcae081bb80357f4b8c13b4c8b"
+version = "0.4.0"
+source = "git+https://github.com/suenot/vasya-engine?tag=v0.4.0#29f280be6630976c8389f1762cea483daa54c0f9"
 dependencies = [
  "async-imap",
  "async-trait",
@@ -6513,10 +6513,11 @@ dependencies = [
 
 [[package]]
 name = "vasya-core"
-version = "0.1.0"
-source = "git+https://github.com/suenot/vasya-engine?tag=v0.3.0#be7c68511d7a9afcae081bb80357f4b8c13b4c8b"
+version = "0.2.0"
+source = "git+https://github.com/suenot/vasya-engine?tag=v0.4.0#29f280be6630976c8389f1762cea483daa54c0f9"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "chacha20poly1305",
  "grammers-client",
  "grammers-mtsender",
@@ -6537,8 +6538,8 @@ dependencies = [
 
 [[package]]
 name = "vasya-server"
-version = "0.1.0"
-source = "git+https://github.com/suenot/vasya-engine?tag=v0.3.0#be7c68511d7a9afcae081bb80357f4b8c13b4c8b"
+version = "0.2.0"
+source = "git+https://github.com/suenot/vasya-engine?tag=v0.4.0#29f280be6630976c8389f1762cea483daa54c0f9"
 dependencies = [
  "anyhow",
  "async-graphql",

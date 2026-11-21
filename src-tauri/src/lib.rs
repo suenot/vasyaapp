@@ -68,6 +68,10 @@ pub fn run() {
         .manage(Arc::new(RwLock::new(initial_state)))
         .invoke_handler(tauri::generate_handler![
             commands::request_login_code,
+            commands::start_qr_login,
+            commands::poll_qr_login,
+            commands::check_qr_password,
+            commands::cancel_qr_login,
             commands::verify_code,
             commands::check_password,
             commands::logout,

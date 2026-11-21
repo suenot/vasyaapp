@@ -30,6 +30,13 @@ export const en = {
   login_2fa_confirm: 'Confirm',
   login_2fa_wrong: 'Wrong password',
   login_request_error: 'Error requesting code',
+  login_qr_button: 'Log in with QR code',
+  login_qr_title: 'Scan this QR code with Telegram',
+  login_qr_instructions: 'On your phone, open Telegram → Settings → Devices → Link Desktop Device, then scan this code.',
+  login_qr_refreshing: 'Refreshing QR code...',
+  login_qr_retry: 'Try again',
+  login_qr_use_phone: 'Log in with phone number',
+  login_qr_error: 'Could not start QR login',
 
   // Account Switcher
   add_account: 'Add account',

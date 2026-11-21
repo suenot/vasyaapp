@@ -80,6 +80,36 @@
   gap: 20px;
 }
 
+.login-qr-code,
+.login-qr-wait {
+  align-self: center;
+  width: 244px;
+  height: 244px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.login-qr-code svg {
+  display: block;
+}
+
+.login-qr-wait {
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.login-qr-hint {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
 .login-input {
   width: 100%;
   padding: 14px 16px;

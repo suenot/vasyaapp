@@ -205,6 +205,23 @@ export class HttpTransport implements TelegramTransport {
         // that handle is the server-issued accountId.
         return { token_data: r.accountId, phone: r.phone } as T;
       }
+      case 'start_qr_login':
+        return this.json<T>('POST', '/telegram/login/qr');
+      case 'poll_qr_login':
+        return this.json<T>('POST', '/telegram/login/qr/poll', {
+          body: { accountId: a.accountId },
+        });
+      case 'cancel_qr_login':
+        return this.json<T>('POST', '/telegram/login/qr/cancel', {
+          body: { accountId: a.accountId },
+        });
+      case 'check_qr_password': {
+        const r = await this.json<{ status: string; user?: unknown }>(
+          'POST', '/telegram/login/qr/password',
+          { body: { accountId: a.accountId, password: a.password } },
+        );
+        return r.user as T;
+      }
       case 'verify_code': {
         const r = await this.json<{ status: string; user?: unknown }>(
           'POST', '/telegram/login/verify', { body: { accountId: a.token, code: a.code } },

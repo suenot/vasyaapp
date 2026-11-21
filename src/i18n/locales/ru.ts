@@ -32,6 +32,13 @@ export const ru: Record<TranslationKey, string> = {
   login_2fa_confirm: 'Подтвердить',
   login_2fa_wrong: 'Неверный пароль',
   login_request_error: 'Ошибка при запросе кода',
+  login_qr_button: 'Войти по QR-коду',
+  login_qr_title: 'Отсканируйте QR-код в Telegram',
+  login_qr_instructions: 'На телефоне откройте Telegram → Настройки → Устройства → Подключить устройство и отсканируйте код.',
+  login_qr_refreshing: 'Обновляем QR-код...',
+  login_qr_retry: 'Повторить',
+  login_qr_use_phone: 'Войти по номеру телефона',
+  login_qr_error: 'Не удалось начать вход по QR-коду',
 
   // Account Switcher
   add_account: 'Добавить аккаунт',

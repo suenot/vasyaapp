@@ -1,12 +1,13 @@
 //! Authentication commands for Tauri frontend
 
 use grammers_client::SignInError;
+use serde::Serialize;
 use std::sync::Arc;
 use tauri::{AppHandle, Manager, State};
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
-use crate::telegram::auth::{AuthToken, UserInfo};
+use crate::telegram::auth::{AuthToken, QrLoginStatus, UserInfo};
 use crate::AppState;
 use super::flood_wait::with_flood_wait_retry;
 
@@ -71,6 +72,128 @@ pub async fn request_login_code(
         token_data: account_id,
         phone,
     })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QrLoginStart {
+    account_id: String,
+    url: String,
+    expires_at: i32,
+}
+
+#[derive(Serialize)]
+#[serde(
+    tag = "status",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum QrLoginOutcome {
+    Pending { url: String, expires_at: i32 },
+    PasswordRequired,
+    Authorized { user: UserInfo },
+}
+
+#[tauri::command]
+pub async fn start_qr_login(
+    state: State<'_, Arc<RwLock<AppState>>>,
+) -> Result<QrLoginStart, String> {
+    let manager = state
+        .read()
+        .await
+        .client_manager
+        .clone()
+        .ok_or("Client manager not initialized")?;
+    let account_id = Uuid::new_v4().to_string();
+    let code = manager
+        .start_qr_login(account_id.clone(), manager.api_id(), manager.api_hash())
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(QrLoginStart {
+        account_id,
+        url: code.url,
+        expires_at: code.expires_at,
+    })
+}
+
+#[tauri::command]
+pub async fn poll_qr_login(
+    account_id: String,
+    app: AppHandle,
+    state: State<'_, Arc<RwLock<AppState>>>,
+) -> Result<QrLoginOutcome, String> {
+    let (manager, updates_ctx) = {
+        let state = state.read().await;
+        let manager = state
+            .client_manager
+            .clone()
+            .ok_or("Client manager not initialized")?;
+        (manager, crate::events::updates_context(&app, &state))
+    };
+    match manager
+        .poll_qr_login(&account_id)
+        .await
+        .map_err(|e| e.to_string())?
+    {
+        QrLoginStatus::Pending(code) => Ok(QrLoginOutcome::Pending {
+            url: code.url,
+            expires_at: code.expires_at,
+        }),
+        QrLoginStatus::PasswordRequired => Ok(QrLoginOutcome::PasswordRequired),
+        QrLoginStatus::Authorized => {
+            let user = manager
+                .finish_qr_login(&account_id, updates_ctx)
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(QrLoginOutcome::Authorized { user })
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn check_qr_password(
+    account_id: String,
+    password: String,
+    app: AppHandle,
+    state: State<'_, Arc<RwLock<AppState>>>,
+) -> Result<UserInfo, String> {
+    let (manager, updates_ctx) = {
+        let state = state.read().await;
+        let manager = state
+            .client_manager
+            .clone()
+            .ok_or("Client manager not initialized")?;
+        (manager, crate::events::updates_context(&app, &state))
+    };
+    if !manager
+        .check_qr_password(&account_id, password.as_bytes())
+        .await
+        .map_err(|e| e.to_string())?
+    {
+        return Err("Invalid two-step verification password".into());
+    }
+    manager
+        .finish_qr_login(&account_id, updates_ctx)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn cancel_qr_login(
+    account_id: String,
+    state: State<'_, Arc<RwLock<AppState>>>,
+) -> Result<(), String> {
+    let manager = state
+        .read()
+        .await
+        .client_manager
+        .clone()
+        .ok_or("Client manager not initialized")?;
+    manager
+        .cancel_qr_login(&account_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// Verify the code entered by user
